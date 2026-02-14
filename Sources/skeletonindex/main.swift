@@ -35,7 +35,10 @@ enum SkeletonIndexCLIMain {
                 printUsage()
             }
         } catch {
-            fputs("error: \(error)\n", stderr)
+            let message = "error: \(error)\n"
+            if let data = message.data(using: .utf8) {
+                FileHandle.standardError.write(data)
+            }
             exit(1)
         }
     }

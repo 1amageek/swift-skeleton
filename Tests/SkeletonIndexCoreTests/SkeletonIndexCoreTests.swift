@@ -2,20 +2,21 @@ import Foundation
 import Testing
 @testable import SkeletonIndexCore
 
-@Test("skeleton output keeps declaration order and omits untyped properties")
-func skeletonOutputContract() throws {
+@Test("files are sorted, declaration order is preserved, and untyped properties are omitted")
+func skeletonOutputOrderingAndPropsContract() throws {
     let projectRoot = try makeTemporaryProject(
         files: [
-            "B.swift": """
-            struct B {
+            "Zeta.swift": """
+            struct Zeta {
                 var typed: String
+                var untyped = 0
                 func foo(_ x: Int, y: Int) -> String {
                     return ""
                 }
             }
             """,
-            "A.swift": """
-            class A: P {
+            "Alpha.swift": """
+            class Alpha: P {
                 let id: Int
                 init(value: Int) {
                     self.id = value
@@ -35,20 +36,56 @@ func skeletonOutputContract() throws {
     let index = try core.build(projectRoot: projectRoot)
     let result = core.getSkeleton(index: index)
 
-    #expect(result.text.contains("class A: P [A.swift:1-6]"))
+    let alphaHeader = "class Alpha: P [Alpha.swift:1-6]"
+    let zetaHeader = "struct Zeta [Zeta.swift:1-7]"
+
+    #expect(result.text.contains(alphaHeader))
     #expect(result.text.contains("  props: id:Int"))
-    #expect(result.text.contains("struct B [B.swift:1-6]"))
+    #expect(result.text.contains(zetaHeader))
     #expect(result.text.contains("  props: typed:String"))
-    #expect(result.text.contains("foo(Int, Int) -> String"))
+    #expect(!result.text.contains("untyped"))
+
+    if let alphaRange = result.text.range(of: alphaHeader), let zetaRange = result.text.range(of: zetaHeader) {
+        #expect(alphaRange.lowerBound < zetaRange.lowerBound)
+    }
 }
 
-@Test("diagnostics include parse_error and incomplete block")
+@Test("methods include unknown parameter types as ? and keep known ranges")
+func unknownParameterTypeContract() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Unknown.swift": """
+            struct Unknown {
+                func mixed(_ value, count: Int, options: [String: Int] = [:]) {
+                }
+            }
+            """,
+        ]
+    )
+    defer {
+        do {
+            try FileManager.default.removeItem(at: URL(fileURLWithPath: projectRoot))
+        } catch {
+        }
+    }
+
+    let core = SkeletonIndexCore()
+    let index = try core.build(projectRoot: projectRoot)
+    let result = core.getSkeleton(index: index)
+
+    #expect(result.text.contains("mixed(?, Int, [String: Int]) [2-3]"))
+}
+
+@Test("diagnostics include parse_error and incomplete block markers")
 func diagnosticsForParseError() throws {
     let projectRoot = try makeTemporaryProject(
         files: [
             "Broken.swift": """
             class Broken {
                 func x() {
+                    let value =
+                }
+            }
             """,
         ]
     )
@@ -65,9 +102,11 @@ func diagnosticsForParseError() throws {
     let diagnostics = core.diagnostics(index: index)
 
     #expect(text.text.contains("# parse_error Broken.swift"))
-    #expect(text.text.contains("# parse_error Broken.swift"))
+    #expect(text.text.contains("class Broken [Broken.swift:1-5] (!)") || text.text.contains("class Broken [Broken.swift:1-6] (!)"))
     #expect(diagnostics.parseErrorFiles == ["Broken.swift"])
-    #expect(diagnostics.incompleteBlocks.count >= 0)
+    #expect(diagnostics.incompleteBlocks.count >= 1)
+    #expect(diagnostics.incompleteBlocks.first?.file == "Broken.swift")
+    #expect(diagnostics.incompleteBlocks.first?.startLine == 1)
 }
 
 @Test("query returns file and range hits")
