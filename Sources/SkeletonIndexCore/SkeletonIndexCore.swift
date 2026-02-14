@@ -1,0 +1,229 @@
+import Foundation
+
+public struct SkeletonIndexCore: Sendable {
+    private let parser: SwiftSkeletonParser
+    private let formatter: SkeletonFormatter
+
+    public init(parser: SwiftSkeletonParser = .init(), formatter: SkeletonFormatter = .init()) {
+        self.parser = parser
+        self.formatter = formatter
+    }
+
+    public func build(projectRoot: String) throws -> ProjectIndex {
+        let rootURL = URL(fileURLWithPath: projectRoot).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
+        guard exists, isDirectory.boolValue else {
+            throw SkeletonError.invalidProjectRoot(projectRoot)
+        }
+
+        var files: [String: ParsedFile] = [:]
+        for relativePath in swiftFilePaths(rootURL: rootURL).sorted() {
+            let absoluteURL = rootURL.appendingPathComponent(relativePath)
+            let source: String
+            do {
+                source = try String(contentsOf: absoluteURL, encoding: .utf8)
+            } catch {
+                throw SkeletonError.fileReadFailed(relativePath)
+            }
+            files[relativePath] = parser.parse(path: relativePath, source: source)
+        }
+
+        return ProjectIndex(
+            projectRoot: rootURL.path,
+            files: files,
+            lastUpdateTS: timestamp(),
+            isWatching: false
+        )
+    }
+
+    public func status(index: ProjectIndex) -> IndexStatus {
+        let parseErrorCount = index.files.values.filter(\.hasParseError).count
+        return IndexStatus(
+            filesIndexed: index.files.count,
+            parseErrorFiles: parseErrorCount,
+            lastUpdateTS: index.lastUpdateTS,
+            isWatching: index.isWatching
+        )
+    }
+
+    public func getSkeleton(index: ProjectIndex, path: String? = nil) -> SkeletonTextResult {
+        if let path {
+            return formatter.render(index: index, path: normalizePath(path, projectRoot: index.projectRoot))
+        }
+        return formatter.render(index: index)
+    }
+
+    public func update(
+        index: inout ProjectIndex,
+        changedPaths: [String],
+        removedPaths: [String]
+    ) throws -> IndexStatus {
+        for removedPath in removedPaths {
+            let normalizedPath = normalizePath(removedPath, projectRoot: index.projectRoot)
+            index.files.removeValue(forKey: normalizedPath)
+        }
+
+        for changedPath in changedPaths {
+            let normalizedPath = normalizePath(changedPath, projectRoot: index.projectRoot)
+            let absolutePath = URL(fileURLWithPath: index.projectRoot).appendingPathComponent(normalizedPath).path
+            if !FileManager.default.fileExists(atPath: absolutePath) {
+                index.files.removeValue(forKey: normalizedPath)
+                continue
+            }
+            let source: String
+            do {
+                source = try String(contentsOfFile: absolutePath, encoding: .utf8)
+            } catch {
+                throw SkeletonError.fileReadFailed(normalizedPath)
+            }
+            index.files[normalizedPath] = parser.parse(path: normalizedPath, source: source)
+        }
+
+        index.lastUpdateTS = timestamp()
+        return status(index: index)
+    }
+
+    public func query(index: ProjectIndex, q: String, limit: Int = 20) -> [QueryHit] {
+        let needle = q.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else {
+            return []
+        }
+
+        var ranked: [(score: Int, hit: QueryHit)] = []
+
+        for filePath in index.files.keys.sorted() {
+            guard let parsedFile = index.files[filePath] else {
+                continue
+            }
+            for block in parsedFile.blocks {
+                let header = formatter.header(for: block, filePath: filePath)
+                let blockText = renderSearchText(block: block, header: header).lowercased()
+                let score = occurrences(of: needle, in: blockText)
+                if score > 0 {
+                    ranked.append((
+                        score: score,
+                        hit: QueryHit(
+                            header: header,
+                            file: filePath,
+                            startLine: block.range.startLine,
+                            endLine: block.range.endLine
+                        )
+                    ))
+                }
+            }
+        }
+
+        return ranked
+            .sorted {
+                if $0.score != $1.score {
+                    return $0.score > $1.score
+                }
+                if $0.hit.file != $1.hit.file {
+                    return $0.hit.file < $1.hit.file
+                }
+                return ($0.hit.startLine ?? 0) < ($1.hit.startLine ?? 0)
+            }
+            .prefix(max(0, limit))
+            .map(\.hit)
+    }
+
+    public func diagnostics(index: ProjectIndex) -> IndexDiagnostics {
+        var parseErrorFiles: [String] = []
+        var incompleteBlocks: [IncompleteBlock] = []
+
+        for filePath in index.files.keys.sorted() {
+            guard let parsedFile = index.files[filePath] else {
+                continue
+            }
+            if parsedFile.hasParseError {
+                parseErrorFiles.append(filePath)
+            }
+            for block in parsedFile.blocks where block.hasErrorNode {
+                incompleteBlocks.append(
+                    IncompleteBlock(
+                        file: filePath,
+                        startLine: block.range.startLine,
+                        endLine: block.range.endLine
+                    )
+                )
+            }
+        }
+
+        return IndexDiagnostics(
+            parseErrorFiles: parseErrorFiles,
+            incompleteBlocks: incompleteBlocks
+        )
+    }
+
+    private func renderSearchText(block: SkeletonBlock, header: String) -> String {
+        var lines: [String] = [header]
+        if !block.properties.isEmpty {
+            lines.append(
+                block.properties
+                    .map { "\($0.name):\($0.typeRef)" }
+                    .joined(separator: " ")
+            )
+        }
+        if !block.methods.isEmpty {
+            lines.append(
+                block.methods
+                    .map { "\($0.name)(\($0.parameterTypeRefs.joined(separator: ","))) \($0.returnTypeRef ?? "")" }
+                    .joined(separator: " ")
+            )
+        }
+        return lines.joined(separator: " ")
+    }
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        guard !needle.isEmpty else {
+            return 0
+        }
+        var count = 0
+        var searchRange = haystack.startIndex..<haystack.endIndex
+        while let foundRange = haystack.range(of: needle, options: [], range: searchRange) {
+            count += 1
+            searchRange = foundRange.upperBound..<haystack.endIndex
+        }
+        return count
+    }
+
+    private func swiftFilePaths(rootURL: URL) -> [String] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [String] = []
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension != "swift" {
+                continue
+            }
+            if fileURL.path.contains("/.build/") || fileURL.path.contains("/.swiftpm/") {
+                continue
+            }
+            let relativePath = normalizePath(fileURL.path, projectRoot: rootURL.path)
+            files.append(relativePath)
+        }
+        return files
+    }
+
+    private func normalizePath(_ path: String, projectRoot: String) -> String {
+        let rootURL = URL(fileURLWithPath: projectRoot).standardizedFileURL
+        let pathURL = URL(fileURLWithPath: path).standardizedFileURL
+
+        if pathURL.path.hasPrefix(rootURL.path + "/") {
+            return String(pathURL.path.dropFirst(rootURL.path.count + 1))
+        }
+        return path
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func timestamp() -> String {
+        ISO8601DateFormatter().string(from: Date())
+    }
+}

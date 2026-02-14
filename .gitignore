@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+Packages/
+.swiftpm/
+
+# Xcode user/local state
+DerivedData/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# SourceKit / editor local caches
+.sourcekit-lsp/
+
+# Sidecar / indexer runtime artifacts
+.skeletonindex/
+*.sock
+*.pid
+*.log
+
+# Secrets / local machine credentials
+.netrc
+.env
+.env.*
