@@ -36,6 +36,11 @@ enum SkeletonMCPServerMain {
                                 "type": .string("string"),
                                 "description": .string("Optional relative file path to get skeleton for a specific file"),
                             ]),
+                            "kinds": .object([
+                                "type": .string("array"),
+                                "items": .object(["type": .string("string")]),
+                                "description": .string("Filter by declaration kind: class, struct, enum, protocol, actor, extension. Omit to include all."),
+                            ]),
                         ]),
                         "required": .array([.string("project_root")]),
                     ])
@@ -94,9 +99,12 @@ enum SkeletonMCPServerMain {
         }
 
         let path = request.arguments?["path"]?.stringValue
+        let kinds: Set<String>? = request.arguments?["kinds"]?.arrayValue.map { array in
+            Set(array.compactMap(\.stringValue))
+        }
 
         do {
-            let result = try await cache.getSkeleton(projectRoot: projectRoot, path: path)
+            let result = try await cache.getSkeleton(projectRoot: projectRoot, path: path, kinds: kinds)
             return CallTool.Result(content: [.text(result.text)])
         } catch {
             return CallTool.Result(

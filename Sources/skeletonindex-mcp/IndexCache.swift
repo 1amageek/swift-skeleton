@@ -9,14 +9,35 @@ actor IndexCache {
         self.core = core
     }
 
-    func getSkeleton(projectRoot: String, path: String?) throws -> SkeletonTextResult {
-        let index = try ensureIndex(projectRoot: projectRoot)
+    func getSkeleton(projectRoot: String, path: String?, kinds: Set<String>?) throws -> SkeletonTextResult {
+        var index = try ensureIndex(projectRoot: projectRoot)
+        if let kinds {
+            index = filtered(index: index, kinds: kinds)
+        }
         return core.getSkeleton(index: index, path: path)
     }
 
     func query(projectRoot: String, q: String, limit: Int) throws -> [QueryHit] {
         let index = try ensureIndex(projectRoot: projectRoot)
         return core.query(index: index, q: q, limit: limit)
+    }
+
+    private func filtered(index: ProjectIndex, kinds: Set<String>) -> ProjectIndex {
+        let filteredFiles = index.files.mapValues { parsedFile in
+            let blocks = parsedFile.blocks.filter { block in
+                switch block.kind {
+                case .type(let name): return kinds.contains(name)
+                case .extension: return kinds.contains("extension")
+                }
+            }
+            return ParsedFile(path: parsedFile.path, blocks: blocks, hasParseError: parsedFile.hasParseError)
+        }.filter { !$0.value.blocks.isEmpty }
+        return ProjectIndex(
+            projectRoot: index.projectRoot,
+            files: filteredFiles,
+            lastUpdateTS: index.lastUpdateTS,
+            isWatching: index.isWatching
+        )
     }
 
     private func ensureIndex(projectRoot: String) throws -> ProjectIndex {
