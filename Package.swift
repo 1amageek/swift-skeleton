@@ -18,16 +18,8 @@ let package = Package(
             targets: ["SkeletonIndexClient"]
         ),
         .executable(
-            name: "skeletonindexd",
-            targets: ["skeletonindexd"]
-        ),
-        .executable(
-            name: "skeletonindex",
-            targets: ["skeletonindex"]
-        ),
-        .executable(
-            name: "skeletonindex-mcp",
-            targets: ["skeletonindex-mcp"]
+            name: "skltn",
+            targets: ["skltn"]
         ),
     ],
     dependencies: [
@@ -59,15 +51,7 @@ let package = Package(
             dependencies: ["SkeletonIndexCore"]
         ),
         .executableTarget(
-            name: "skeletonindexd",
-            dependencies: ["SkeletonIndexCore", "SkeletonSwiftParser"]
-        ),
-        .executableTarget(
-            name: "skeletonindex",
-            dependencies: ["SkeletonIndexClient", "SkeletonSwiftParser"]
-        ),
-        .executableTarget(
-            name: "skeletonindex-mcp",
+            name: "skltn",
             dependencies: [
                 "SkeletonIndexCore",
                 "SkeletonSwiftParser",

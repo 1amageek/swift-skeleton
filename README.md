@@ -29,24 +29,36 @@ From this alone, an LLM can instantly understand:
 
 Built on [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) for fast, accurate parsing.
 
+## Installation
+
+### Mint (recommended)
+
+```bash
+mint install 1amageek/swift-skeleton
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/1amageek/swift-skeleton.git
+cd swift-skeleton
+swift build -c release
+```
+
 ## MCP Server (Claude Code)
 
 Runs as an [MCP](https://modelcontextprotocol.io) server so Claude Code can query codebase structure directly.
 
 ### Setup
 
-```bash
-swift build -c release
-```
-
 Add `.mcp.json` to your project root:
 
 ```json
 {
   "mcpServers": {
-    "skeletonindex": {
-      "command": "/path/to/swift-skeleton/.build/release/skeletonindex-mcp",
-      "args": []
+    "skltn": {
+      "command": "skltn",
+      "args": ["mcp"]
     }
   }
 }
@@ -80,13 +92,19 @@ Search symbols by name.
 
 ```bash
 # Full project skeleton
-skeletonindex get_skeleton --project-root /path/to/project
+skltn get_skeleton --project-root /path/to/project
 
 # Single file skeleton
-skeletonindex get_skeleton --project-root /path/to/project --path Sources/MyFile.swift
+skltn get_skeleton --project-root /path/to/project --path Sources/MyFile.swift
 
 # Symbol search
-skeletonindex query --project-root /path/to/project --q "MyClass" --limit 10
+skltn query --project-root /path/to/project --q "MyClass" --limit 10
+
+# JSON-RPC daemon (stdin/stdout)
+skltn daemon
+
+# MCP server (stdin/stdout)
+skltn mcp
 ```
 
 ## Architecture
@@ -95,9 +113,7 @@ skeletonindex query --project-root /path/to/project --q "MyClass" --limit 10
 SkeletonIndexCore          Language-agnostic core (protocols, models, formatter, index)
 SkeletonSwiftParser        Swift parser (Tree-sitter dependency isolated here)
 SkeletonIndexClient        EmbeddedService / SidecarService
-skeletonindex              CLI
-skeletonindexd             JSON-RPC daemon
-skeletonindex-mcp          MCP server for Claude Code
+skltn                      CLI / Daemon / MCP server (unified executable)
 ```
 
 The core has zero dependency on Tree-sitter. Parsers are injected via the `SkeletonParser` protocol.
@@ -140,7 +156,7 @@ let hits = core.query(index: index, q: "MyType", limit: 10)
 ```swift
 import SkeletonIndexClient
 
-let service = SidecarService(executablePath: "skeletonindexd")
+let service = SidecarService(executablePath: "skltn")
 let result = try await service.open(projectRoot: "/path/to/project", languages: ["swift"])
 let skeleton = try await service.getSkeleton(projectID: result.projectID)
 ```
@@ -148,7 +164,7 @@ let skeleton = try await service.getSkeleton(projectID: result.projectID)
 ### JSON-RPC Daemon
 
 ```bash
-skeletonindexd
+skltn daemon
 ```
 
 Methods: `index.open`, `index.status`, `index.get_skeleton`, `index.update`, `index.query`, `index.diagnostics`
@@ -157,14 +173,6 @@ Methods: `index.open`, `index.status`, `index.get_skeleton`, `index.update`, `in
 
 - Swift 6.2+
 - macOS 13+
-
-## Installation
-
-```bash
-git clone https://github.com/1amageek/swift-skeleton.git
-cd swift-skeleton
-swift build -c release
-```
 
 ## License
 

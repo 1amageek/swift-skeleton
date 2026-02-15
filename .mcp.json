@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "skeletonindex": {
-      "command": "/Users/1amageek/Desktop/swift-skeleton/.build/release/skeletonindex-mcp",
-      "args": []
+    "skltn": {
+      "command": "skltn",
+      "args": ["mcp"]
     }
   }
 }

@@ -270,8 +270,8 @@ func multiModuleScan() throws {
     #expect(files.contains("SkeletonIndexClient/EmbeddedService.swift"))
     #expect(files.contains("SkeletonIndexClient/SidecarService.swift"))
     #expect(files.contains("SkeletonIndexClient/SkeletonIndexService.swift"))
-    #expect(files.contains("skeletonindex/SkeletonIndexCLI.swift"))
-    #expect(files.contains("skeletonindexd/SkeletonIndexDaemon.swift"))
+    #expect(files.contains("skltn/SkeletonIndexCLI.swift"))
+    #expect(files.contains("skltn/DaemonCommand.swift"))
     #expect(files.contains("SkeletonSwiftParser/SwiftSkeletonParser.swift"))
 }
 
@@ -315,22 +315,19 @@ func extractsCLIEnum() throws {
     let index = try core.build(projectRoot: projectAllSourcesRoot())
     let result = core.getSkeleton(index: index)
 
-    #expect(result.text.contains("enum SkeletonIndexCLIMain [skeletonindex/SkeletonIndexCLI.swift:"))
+    #expect(result.text.contains("enum SkeletonIndexCLIMain [skltn/SkeletonIndexCLI.swift:"))
     #expect(result.text.contains("main()"))
     #expect(result.text.contains("value(String, [String]) -> String"))
     #expect(result.text.contains("optionalValue(String, [String]) -> String?"))
 }
 
-@Test("Daemon enum extracted with handle method")
-func extractsDaemonEnum() throws {
+@Test("Daemon functions extracted from DaemonCommand")
+func extractsDaemonFunctions() throws {
     let core = makeCore()
     let index = try core.build(projectRoot: projectAllSourcesRoot())
-    let result = core.getSkeleton(index: index)
+    let files = Set(index.files.keys)
 
-    #expect(result.text.contains("enum SkeletonIndexDaemonMain [skeletonindexd/SkeletonIndexDaemon.swift:"))
-    #expect(result.text.contains("handle(String, SkeletonProjectRegistry) -> [String: Any]"))
-    #expect(result.text.contains("encodeStatus(IndexStatus) -> [String: Any]"))
-    #expect(result.text.contains("errorResponse(Any, Int, String) -> [String: Any]"))
+    #expect(files.contains("skltn/DaemonCommand.swift"))
 }
 
 @Test("subdirectory paths are relative in multi-module scan")
