@@ -1,5 +1,6 @@
 import Foundation
 import SkeletonIndexClient
+import SkeletonSwiftParser
 
 @main
 enum SkeletonIndexCLIMain {
@@ -15,7 +16,7 @@ enum SkeletonIndexCLIMain {
             case "build", "get_skeleton":
                 let projectRoot = try value(for: "--project-root", in: arguments)
                 let path = optionalValue(for: "--path", in: arguments)
-                let service = EmbeddedService()
+                let service = EmbeddedService(parsers: [SwiftSkeletonParser()])
                 let opened = try await service.open(projectRoot: projectRoot, languages: ["swift"])
                 let result = try await service.getSkeleton(projectID: opened.projectID, path: path)
                 print(result.text)
@@ -23,7 +24,7 @@ enum SkeletonIndexCLIMain {
                 let projectRoot = try value(for: "--project-root", in: arguments)
                 let query = try value(for: "--q", in: arguments)
                 let limit = optionalValue(for: "--limit", in: arguments).flatMap(Int.init) ?? 20
-                let service = EmbeddedService()
+                let service = EmbeddedService(parsers: [SwiftSkeletonParser()])
                 let opened = try await service.open(projectRoot: projectRoot, languages: ["swift"])
                 let hits = try await service.query(projectID: opened.projectID, q: query, limit: limit)
                 for hit in hits {

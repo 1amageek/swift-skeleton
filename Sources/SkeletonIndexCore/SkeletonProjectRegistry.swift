@@ -4,14 +4,16 @@ public actor SkeletonProjectRegistry {
     private let core: SkeletonIndexCore
     private var projects: [String: ProjectIndex]
 
-    public init(core: SkeletonIndexCore = .init()) {
+    public init(core: SkeletonIndexCore) {
         self.core = core
         self.projects = [:]
     }
 
     public func open(projectRoot: String, languages: [String]) throws -> OpenResult {
-        if !languages.contains("swift") {
-            throw SkeletonError.unsupportedLanguage(languages.joined(separator: ","))
+        let supported = core.supportedLanguages
+        let unsupported = languages.filter { !supported.contains($0) }
+        if !unsupported.isEmpty {
+            throw SkeletonError.unsupportedLanguage(unsupported.joined(separator: ","))
         }
         let index = try core.build(projectRoot: projectRoot)
         let projectID = UUID().uuidString.lowercased()

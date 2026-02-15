@@ -36,7 +36,7 @@ public struct SkeletonFormatter: Sendable {
 
         switch block.kind {
         case .type(let keyword):
-            base = "\(keyword.rawValue) \(block.typeName)\(inheritance) [\(filePath):\(rangeText)]"
+            base = "\(keyword) \(block.typeName)\(inheritance) [\(filePath):\(rangeText)]"
         case .extension:
             base = "extension \(block.typeName)\(inheritance) [\(filePath):\(rangeText)]"
         }

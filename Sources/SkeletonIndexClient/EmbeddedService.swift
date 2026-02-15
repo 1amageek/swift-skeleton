@@ -4,8 +4,9 @@ import SkeletonIndexCore
 public final actor EmbeddedService: SkeletonIndexService {
     private let registry: SkeletonProjectRegistry
 
-    public init(registry: SkeletonProjectRegistry = .init()) {
-        self.registry = registry
+    public init(parsers: [any SkeletonParser]) {
+        let core = SkeletonIndexCore(parsers: parsers)
+        self.registry = SkeletonProjectRegistry(core: core)
     }
 
     public func open(projectRoot: String, languages: [String]) async throws -> OpenResult {

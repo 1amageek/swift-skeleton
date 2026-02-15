@@ -9,6 +9,10 @@ let package = Package(
             targets: ["SkeletonIndexCore"]
         ),
         .library(
+            name: "SkeletonSwiftParser",
+            targets: ["SkeletonSwiftParser"]
+        ),
+        .library(
             name: "SkeletonIndexClient",
             targets: ["SkeletonIndexClient"]
         ),
@@ -34,8 +38,12 @@ let package = Package(
             ]
         ),
         .target(
-            name: "SkeletonIndexCore",
+            name: "SkeletonIndexCore"
+        ),
+        .target(
+            name: "SkeletonSwiftParser",
             dependencies: [
+                "SkeletonIndexCore",
                 "TreeSitterSwiftGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -46,15 +54,15 @@ let package = Package(
         ),
         .executableTarget(
             name: "skeletonindexd",
-            dependencies: ["SkeletonIndexCore"]
+            dependencies: ["SkeletonIndexCore", "SkeletonSwiftParser"]
         ),
         .executableTarget(
             name: "skeletonindex",
-            dependencies: ["SkeletonIndexClient"]
+            dependencies: ["SkeletonIndexClient", "SkeletonSwiftParser"]
         ),
         .testTarget(
             name: "SkeletonIndexCoreTests",
-            dependencies: ["SkeletonIndexCore"]
+            dependencies: ["SkeletonIndexCore", "SkeletonSwiftParser"]
         ),
     ]
 )

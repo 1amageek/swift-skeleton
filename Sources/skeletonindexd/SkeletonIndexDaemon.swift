@@ -1,11 +1,12 @@
 import Foundation
 import SkeletonIndexCore
+import SkeletonSwiftParser
 
 @main
 enum SkeletonIndexDaemonMain {
     static func main() async {
-        let registry = SkeletonProjectRegistry()
-        let stdin = FileHandle.standardInput
+        let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
+        let registry = SkeletonProjectRegistry(core: core)
         let stdout = FileHandle.standardOutput
 
         while let line = readLine() {
@@ -30,9 +31,6 @@ enum SkeletonIndexDaemonMain {
                 } catch {
                     // Ignore serialization failure for fallback response.
                 }
-            }
-            if stdin.availableData.isEmpty {
-                break
             }
         }
     }

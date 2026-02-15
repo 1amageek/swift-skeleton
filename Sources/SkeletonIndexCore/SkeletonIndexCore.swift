@@ -1,12 +1,16 @@
 import Foundation
 
 public struct SkeletonIndexCore: Sendable {
-    private let parser: SwiftSkeletonParser
+    private let parsers: [any SkeletonParser]
     private let formatter: SkeletonFormatter
 
-    public init(parser: SwiftSkeletonParser = .init(), formatter: SkeletonFormatter = .init()) {
-        self.parser = parser
+    public init(parsers: [any SkeletonParser], formatter: SkeletonFormatter = .init()) {
+        self.parsers = parsers
         self.formatter = formatter
+    }
+
+    public var supportedLanguages: Set<String> {
+        Set(parsers.map(\.languageName))
     }
 
     public func build(projectRoot: String) throws -> ProjectIndex {
@@ -18,13 +22,16 @@ public struct SkeletonIndexCore: Sendable {
         }
 
         var files: [String: ParsedFile] = [:]
-        for relativePath in swiftFilePaths(rootURL: rootURL).sorted() {
+        for relativePath in sourceFilePaths(rootURL: rootURL).sorted() {
             let absoluteURL = rootURL.appendingPathComponent(relativePath)
             let source: String
             do {
                 source = try String(contentsOf: absoluteURL, encoding: .utf8)
             } catch {
                 throw SkeletonError.fileReadFailed(relativePath)
+            }
+            guard let parser = parser(for: relativePath) else {
+                continue
             }
             files[relativePath] = parser.parse(path: relativePath, source: source)
         }
@@ -76,6 +83,9 @@ public struct SkeletonIndexCore: Sendable {
                 source = try String(contentsOfFile: absolutePath, encoding: .utf8)
             } catch {
                 throw SkeletonError.fileReadFailed(normalizedPath)
+            }
+            guard let parser = parser(for: normalizedPath) else {
+                continue
             }
             index.files[normalizedPath] = parser.parse(path: normalizedPath, source: source)
         }
@@ -156,6 +166,36 @@ public struct SkeletonIndexCore: Sendable {
         )
     }
 
+    private func parser(for path: String) -> (any SkeletonParser)? {
+        let ext = URL(fileURLWithPath: path).pathExtension
+        return parsers.first { $0.supportedExtensions.contains(ext) }
+    }
+
+    private func sourceFilePaths(rootURL: URL) -> [String] {
+        let allExtensions = parsers.reduce(into: Set<String>()) { $0.formUnion($1.supportedExtensions) }
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [String] = []
+        for case let fileURL as URL in enumerator {
+            guard allExtensions.contains(fileURL.pathExtension) else {
+                continue
+            }
+            if fileURL.path.contains("/.build/") || fileURL.path.contains("/.swiftpm/") || fileURL.path.contains("/node_modules/") {
+                continue
+            }
+            let relativePath = normalizePath(fileURL.path, projectRoot: rootURL.path)
+            files.append(relativePath)
+        }
+        return files
+    }
+
     private func renderSearchText(block: SkeletonBlock, header: String) -> String {
         var lines: [String] = [header]
         if !block.properties.isEmpty {
@@ -186,29 +226,6 @@ public struct SkeletonIndexCore: Sendable {
             searchRange = foundRange.upperBound..<haystack.endIndex
         }
         return count
-    }
-
-    private func swiftFilePaths(rootURL: URL) -> [String] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
-        var files: [String] = []
-        for case let fileURL as URL in enumerator {
-            if fileURL.pathExtension != "swift" {
-                continue
-            }
-            if fileURL.path.contains("/.build/") || fileURL.path.contains("/.swiftpm/") {
-                continue
-            }
-            let relativePath = normalizePath(fileURL.path, projectRoot: rootURL.path)
-            files.append(relativePath)
-        }
-        return files
     }
 
     private func normalizePath(_ path: String, projectRoot: String) -> String {
