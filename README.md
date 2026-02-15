@@ -2,21 +2,13 @@
 
 Give LLMs the full picture of your codebase — without the full source.
 
-swift-skeleton extracts the "skeleton" of source code: type declarations, properties, method signatures, inheritance, file paths, and line numbers. Everything an LLM needs to understand a codebase, compact enough to fit in a context window.
+## Why Skeleton?
 
-## Problem
+An LLM coding agent explores a codebase the same way a developer joins a new project. It doesn't need to read every line — it needs to see the shape first: what types exist, what methods they expose, how they relate to each other, and where to find them.
 
-Feeding full source files to an LLM doesn't scale.
+That shape is the **skeleton** — declarations without implementations. Like looking at a building's blueprint instead of walking every room.
 
-- Too many files to fit in context
-- Implementation details (loops, branches, local variables) are noise
-- `grep` and `find` don't reveal type relationships
-
-What LLMs actually need is: **what's declared, what's the interface, and where is it**.
-
-## Solution
-
-swift-skeleton parses source code with [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) and strips everything but the declarations.
+swift-skeleton extracts this skeleton automatically: type declarations, properties, method signatures, inheritance, file paths, and line numbers. The result fits in a context window where full source code never would. The LLM reads the skeleton, understands the architecture, and then dives into only the files it actually needs.
 
 ```
 struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.swift:3-246]
@@ -35,7 +27,7 @@ From this alone, an LLM can instantly understand:
 - Results are retrieved via `getSkeleton` and `query`
 - The implementation lives in `SkeletonIndexCore.swift` lines 3–246
 
-No need to read the full source. The skeleton is enough to grasp the architecture and decide which files to dive into.
+Built on [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) for fast, accurate parsing.
 
 ## MCP Server (Claude Code)
 
