@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "swift-skeleton",
+    platforms: [.macOS(.v13)],
     products: [
         .library(
             name: "SkeletonIndexCore",
@@ -24,9 +25,14 @@ let package = Package(
             name: "skeletonindex",
             targets: ["skeletonindex"]
         ),
+        .executable(
+            name: "skeletonindex-mcp",
+            targets: ["skeletonindex-mcp"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/tree-sitter/swift-tree-sitter.git", from: "0.9.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.7.1"),
     ],
     targets: [
         .target(
@@ -59,6 +65,14 @@ let package = Package(
         .executableTarget(
             name: "skeletonindex",
             dependencies: ["SkeletonIndexClient", "SkeletonSwiftParser"]
+        ),
+        .executableTarget(
+            name: "skeletonindex-mcp",
+            dependencies: [
+                "SkeletonIndexCore",
+                "SkeletonSwiftParser",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
         .testTarget(
             name: "SkeletonIndexCoreTests",
