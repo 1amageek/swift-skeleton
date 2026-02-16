@@ -5,9 +5,9 @@ extension SkeletonIndexCLIMain {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
 
-        let targets: [(name: String, dir: String)] = [
-            ("Claude Code", "\(home)/.claude/skills/skeleton"),
-            ("Codex", "\(home)/.codex/skills/skeleton"),
+        let targets: [(name: String, dir: String, content: String)] = [
+            ("Claude Code", "\(home)/.claude/skills/skeleton", claudeCodeSkillContent),
+            ("Codex", "\(home)/.codex/skills/skeleton", codexSkillContent),
         ]
 
         var installed: [String] = []
@@ -19,7 +19,7 @@ extension SkeletonIndexCLIMain {
 
             try fm.createDirectory(atPath: target.dir, withIntermediateDirectories: true)
             let path = "\(target.dir)/SKILL.md"
-            try skillContent.write(toFile: path, atomically: true, encoding: .utf8)
+            try target.content.write(toFile: path, atomically: true, encoding: .utf8)
             installed.append("\(target.name): \(path)")
         }
 
@@ -33,13 +33,9 @@ extension SkeletonIndexCLIMain {
     }
 }
 
-private let skillContent = """
----
-name: skeleton
-description: Get codebase skeleton (type declarations, methods, properties) to understand project architecture. Supports Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java. Use this to grasp the full picture of a project — all types, methods, and properties at a glance. Run before code exploration to give structural context.
-allowed-tools: Bash, Read, Task
----
+// MARK: - Shared sections
 
+private let sharedBody = """
 Run `skltn get_skeleton --project-root <path>` to get the structural overview of a project.
 
 **Target**: $ARGUMENTS (if empty, use the current working directory)
@@ -74,13 +70,48 @@ A complete structural map of a project: every type declaration, method signature
 - `(!)` suffix on a type header = partial parse (e.g., missing closing brace)
 - `?` in line range = line number unknown
 
-## Before code exploration
-
-When exploring an unfamiliar codebase, run `skltn get_skeleton` on the project root FIRST. Use the skeleton result as a structural map before diving into individual files.
-
 ## Supported languages
 
 Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+"""
+
+// MARK: - Claude Code
+
+private let claudeCodeSkillContent = """
+---
+name: skeleton
+description: Get codebase skeleton (type declarations, methods, properties) to understand project architecture. Supports Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java. Use this to grasp the full picture of a project — all types, methods, and properties at a glance. Also run before launching an Explore agent to give it structural context.
+allowed-tools: Bash, Read, Task
+---
+
+\(sharedBody)
+
+## Before Explore agents
+
+When launching an Explore agent on a project, run `skltn get_skeleton` on that project root FIRST. Pass the skeleton result into the Explore agent's prompt so it has a structural map before exploring.
+
+## When to use
+
+- To grasp the full architecture of a project at a glance
+- Before launching an Explore agent on a project
+- When planning changes that span multiple modules
+- To understand module boundaries and public API surface
+- To quickly answer "what types/methods exist in this project?"
+"""
+
+// MARK: - Codex
+
+private let codexSkillContent = """
+---
+name: skeleton
+description: Get codebase skeleton (type declarations, methods, properties) to understand project architecture. Supports Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java. Use this to grasp the full picture of a project — all types, methods, and properties at a glance. Run before code exploration to give structural context.
+---
+
+\(sharedBody)
+
+## Before code exploration
+
+When exploring an unfamiliar codebase, run `skltn get_skeleton` on the project root FIRST. Use the skeleton result as a structural map before diving into individual files.
 
 ## When to use
 
