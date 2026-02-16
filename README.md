@@ -29,6 +29,12 @@ From this alone, an LLM can instantly understand:
 
 Built on [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) for fast, accurate parsing.
 
+## Supported Languages
+
+Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+
+Each language parser is selectable via [Package Traits (SE-0450)](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0450-swiftpm-package-traits.md). Build with `--disable-default-traits` for Swift-only.
+
 ## Installation
 
 ### Mint (recommended)
@@ -45,7 +51,28 @@ cd swift-skeleton
 swift build -c release
 ```
 
-## MCP Server (Claude Code)
+## Agent Skill
+
+swift-skeleton provides a **Skill** for LLM coding agents (Claude Code, Codex). The skill gives the agent a structural overview of any project before it starts exploring files.
+
+### Install
+
+```bash
+skltn install-skill
+```
+
+This installs `SKILL.md` to both `~/.claude/skills/skeleton/` and `~/.codex/skills/skeleton/` (whichever tools are present).
+
+### Usage
+
+```
+# Explicit invocation
+/skeleton /path/to/project
+
+# The agent can also invoke it automatically before code exploration
+```
+
+## MCP Server
 
 Runs as an [MCP](https://modelcontextprotocol.io) server so Claude Code can query codebase structure directly.
 
@@ -100,6 +127,9 @@ skltn get_skeleton --project-root /path/to/project --path Sources/MyFile.swift
 # Symbol search
 skltn query --project-root /path/to/project --q "MyClass" --limit 10
 
+# Install agent skill (Claude Code / Codex)
+skltn install-skill
+
 # JSON-RPC daemon (stdin/stdout)
 skltn daemon
 
@@ -111,7 +141,15 @@ skltn mcp
 
 ```
 SkeletonIndexCore          Language-agnostic core (protocols, models, formatter, index)
-SkeletonSwiftParser        Swift parser (Tree-sitter dependency isolated here)
+SkeletonSwiftParser        Swift parser (Tree-sitter)
+SkeletonKotlinParser       Kotlin parser (Tree-sitter)
+SkeletonTypeScriptParser   TypeScript parser (Tree-sitter)
+SkeletonGoParser           Go parser (Tree-sitter)
+SkeletonZigParser          Zig parser (Tree-sitter)
+SkeletonRustParser         Rust parser (Tree-sitter)
+SkeletonCppParser          C++ parser (Tree-sitter)
+SkeletonPythonParser       Python parser (indent-based AST)
+SkeletonJavaParser         Java parser (Tree-sitter)
 SkeletonIndexClient        EmbeddedService / SidecarService
 skltn                      CLI / Daemon / MCP server (unified executable)
 ```

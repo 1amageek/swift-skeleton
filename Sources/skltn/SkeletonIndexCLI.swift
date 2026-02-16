@@ -19,6 +19,8 @@ enum SkeletonIndexCLIMain {
             try runGetSkeleton(arguments: arguments)
         case "query":
             try runQuery(arguments: arguments)
+        case "install-skill":
+            try installSkill()
         default:
             printUsage()
         }
@@ -69,6 +71,7 @@ enum SkeletonIndexCLIMain {
               skltn query --project-root <path> --q <string> [--limit <n>]
               skltn daemon
               skltn mcp
+              skltn install-skill
             """
         )
     }
