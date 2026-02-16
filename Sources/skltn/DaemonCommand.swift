@@ -1,9 +1,8 @@
 import Foundation
 import SkeletonIndexCore
-import SkeletonSwiftParser
 
 func runDaemon() async {
-    let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
+    let core = SkeletonIndexCore(parsers: allParsers())
     let registry = SkeletonProjectRegistry(core: core)
     let stdout = FileHandle.standardOutput
 

@@ -1,10 +1,9 @@
 import Foundation
 import MCP
 import SkeletonIndexCore
-import SkeletonSwiftParser
 
 func runMCP() async throws {
-    let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
+    let core = SkeletonIndexCore(parsers: allParsers())
     let cache = IndexCache(core: core)
 
     let server = Server(

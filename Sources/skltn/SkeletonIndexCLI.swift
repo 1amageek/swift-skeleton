@@ -1,6 +1,5 @@
 import Foundation
 import SkeletonIndexCore
-import SkeletonSwiftParser
 
 @main
 enum SkeletonIndexCLIMain {
@@ -28,7 +27,7 @@ enum SkeletonIndexCLIMain {
     private static func runGetSkeleton(arguments: [String]) throws {
         let projectRoot = try value(for: "--project-root", in: arguments)
         let path = optionalValue(for: "--path", in: arguments)
-        let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
+        let core = SkeletonIndexCore(parsers: allParsers())
         let index = try core.build(projectRoot: projectRoot)
         let result = core.getSkeleton(index: index, path: path)
         print(result.text)
@@ -38,7 +37,7 @@ enum SkeletonIndexCLIMain {
         let projectRoot = try value(for: "--project-root", in: arguments)
         let query = try value(for: "--q", in: arguments)
         let limit = optionalValue(for: "--limit", in: arguments).flatMap(Int.init) ?? 20
-        let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
+        let core = SkeletonIndexCore(parsers: allParsers())
         let index = try core.build(projectRoot: projectRoot)
         let hits = core.query(index: index, q: query, limit: limit)
         for hit in hits {

@@ -171,6 +171,21 @@ public struct SkeletonIndexCore: Sendable {
         return parsers.first { $0.supportedExtensions.contains(ext) }
     }
 
+    private static let excludedPaths: [String] = [
+        "/.build/",
+        "/.swiftpm/",
+        "/node_modules/",
+        "/vendor/",
+        "/target/",
+        "/__pycache__/",
+        "/.venv/",
+        "/venv/",
+        "/zig-cache/",
+        "/zig-out/",
+        "/build/",
+        "/out/",
+    ]
+
     private func sourceFilePaths(rootURL: URL) -> [String] {
         let allExtensions = parsers.reduce(into: Set<String>()) { $0.formUnion($1.supportedExtensions) }
 
@@ -187,7 +202,7 @@ public struct SkeletonIndexCore: Sendable {
             guard allExtensions.contains(fileURL.pathExtension) else {
                 continue
             }
-            if fileURL.path.contains("/.build/") || fileURL.path.contains("/.swiftpm/") || fileURL.path.contains("/node_modules/") {
+            if Self.excludedPaths.contains(where: { fileURL.path.contains($0) }) {
                 continue
             }
             let relativePath = normalizePath(fileURL.path, projectRoot: rootURL.path)
