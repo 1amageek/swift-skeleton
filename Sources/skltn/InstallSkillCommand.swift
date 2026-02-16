@@ -55,7 +55,7 @@ A complete structural map of a project: every type declaration, method signature
    - Otherwise use the current working directory
 2. Run `skltn get_skeleton --project-root <project-root>` via Bash
 3. Present the skeleton output to the user as a structural overview
-4. If the output exceeds 1200 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
+4. If the output exceeds 2000 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
 
 ## Output format
 
