@@ -5,7 +5,7 @@ extension SkeletonIndexCLIMain {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
 
-        let targets: [(name: String, dir: String, content: String)] = [
+        let targets: [(name: String, dir: String, skillContent: String)] = [
             ("Claude Code", "\(home)/.claude/skills/skeleton", claudeCodeSkillContent),
             ("Codex", "\(home)/.codex/skills/skeleton", codexSkillContent),
         ]
@@ -17,10 +17,19 @@ extension SkeletonIndexCLIMain {
             let toolRoot = (parentDir as NSString).deletingLastPathComponent
             guard fm.fileExists(atPath: toolRoot) else { continue }
 
-            try fm.createDirectory(atPath: target.dir, withIntermediateDirectories: true)
-            let path = "\(target.dir)/SKILL.md"
-            try target.content.write(toFile: path, atomically: true, encoding: .utf8)
-            installed.append("\(target.name): \(path)")
+            let refsDir = "\(target.dir)/references"
+            try fm.createDirectory(atPath: refsDir, withIntermediateDirectories: true)
+
+            let skillPath = "\(target.dir)/SKILL.md"
+            try target.skillContent.write(toFile: skillPath, atomically: true, encoding: .utf8)
+
+            let outputFormatPath = "\(refsDir)/output-format.md"
+            try outputFormatContent.write(toFile: outputFormatPath, atomically: true, encoding: .utf8)
+
+            let mcpSetupPath = "\(refsDir)/mcp-setup.md"
+            try mcpSetupContent.write(toFile: mcpSetupPath, atomically: true, encoding: .utf8)
+
+            installed.append("\(target.name): \(target.dir)")
         }
 
         if installed.isEmpty {
@@ -33,27 +42,119 @@ extension SkeletonIndexCLIMain {
     }
 }
 
-// MARK: - Shared sections
+// MARK: - Shared SKILL.md body
 
-private let sharedBody = """
-Run `skltn get_skeleton --project-root <path>` to get the structural overview of a project.
+private let sharedSkillBody = """
 
-**Target**: $ARGUMENTS (if empty, use the current working directory)
+# Skeleton
 
-## What this provides
-
-A complete structural map of a project: every type declaration, method signature, property, and inheritance relationship — extracted instantly without reading individual files. This is the fastest way to understand what a codebase contains and how it is organized.
+Get a structural overview of any codebase — declarations without implementations.
 
 ## Instructions
 
-1. Determine the project root:
-   - If `$ARGUMENTS` contains a path, use it
-   - Otherwise use the current working directory
-2. Run `skltn get_skeleton --project-root <project-root>` via Bash
-3. Present the skeleton output to the user as a structural overview
-4. If the output exceeds 2000 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
+### Step 1: Determine the project root
 
-## Output format
+- If `$ARGUMENTS` contains a path, use it
+- Otherwise use the current working directory
+
+### Step 2: Run the skeleton extraction
+
+```bash
+skltn get_skeleton --project-root /absolute/path/to/project
+```
+
+To filter a single file:
+
+```bash
+skltn get_skeleton --project-root /absolute/path/to/project --path Sources/MyFile.swift
+```
+
+### Step 3: Present the output
+
+- Show the skeleton as a structural overview
+- If the output exceeds 2000 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
+
+### Step 4: Search symbols (optional)
+
+```bash
+skltn query --project-root /absolute/path/to/project --q "MyType" --limit 10
+```
+
+Returns matching declarations with file path and line numbers (default limit: 20).
+
+## Reading the output
+
+Top-level lines (no indent) are type declarations — use these for summaries. Indented lines show properties and methods with their signatures and line ranges.
+
+For the full output format specification, consult `references/output-format.md`.
+
+## Supported languages
+
+Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+
+## MCP integration
+
+If the `skltn` MCP server is configured (via `.mcp.json`), you can also use `get_skeleton` and `query_symbols` tools directly without Bash. See `references/mcp-setup.md` for setup and tool parameters.
+
+## Common issues
+
+### skltn command not found
+
+Install via Mint:
+
+```bash
+mint install 1amageek/swift-skeleton
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/1amageek/swift-skeleton.git
+cd swift-skeleton && swift build -c release
+```
+
+### parse_error or (!) in output
+
+These are expected for files with syntax errors. The skeleton continues processing — partial results are still usable. `# parse_error` means a file failed entirely. `(!)` means a block was partially parsed (e.g., missing closing brace).
+"""
+
+// MARK: - Claude Code
+
+private let claudeCodeSkillContent = """
+---
+name: skeleton
+description: Understand the overall structure and architecture of a codebase. Extracts all type declarations, method signatures, properties, and inheritance relationships into a compact skeleton. Use when user asks about project architecture, says "show me the structure", wants to explore an unfamiliar codebase, or is planning multi-module changes. Also use before launching an Explore agent to give it a structural map.
+allowed-tools: Bash, Read, Task
+license: MIT
+compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
+metadata:
+  author: 1amageek
+  mcp-server: skltn
+---
+\(sharedSkillBody)
+"""
+
+// MARK: - Codex
+
+private let codexSkillContent = """
+---
+name: skeleton
+description: Understand the overall structure and architecture of a codebase. Extracts all type declarations, method signatures, properties, and inheritance relationships into a compact skeleton. Use when user asks about project architecture, says "show me the structure", wants to explore an unfamiliar codebase, or is planning multi-module changes. Also use before spawning an explorer agent to give it a structural map.
+license: MIT
+compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
+metadata:
+  author: 1amageek
+  mcp-server: skltn
+---
+\(sharedSkillBody)
+"""
+
+// MARK: - references/output-format.md
+
+private let outputFormatContent = """
+# Output Format Specification
+
+## Structure
 
 ```
 <kind> <Name>[: Conformances] [<file>:<start>-<end>]
@@ -62,62 +163,124 @@ A complete structural map of a project: every type declaration, method signature
     <name>(<ParamTypes>) [-> ReturnType] [<start>-<end>]
 ```
 
-- Top-level lines (no indent) = type declarations. Use these for summaries
-- `props:` = stored properties with types
-- `methods:` = method signatures with parameter types, return type, and line range
-- `[start-end]` = source file line range. Use to navigate directly to the implementation
-- `# parse_error <file>` = file-level parse failure
-- `(!)` suffix on a type header = partial parse (e.g., missing closing brace)
-- `?` in line range = line number unknown
+## Line types
 
-## Supported languages
+### Type header (no indent)
 
-Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+```
+struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.swift:3-246]
+```
+
+- `<kind>`: class, struct, enum, protocol, actor, extension
+- `<Name>`: Type name
+- `: Conformances`: Inheritance and protocol conformance (omitted if none)
+- `[file:start-end]`: Source file path and line range
+
+### Properties
+
+```
+  props: parsers:[any SkeletonParser], formatter:SkeletonFormatter
+```
+
+- Comma-separated list of `name:Type` pairs
+- Only properties with explicit type annotations are shown
+- Omitted entirely if none
+
+### Methods
+
+```
+  methods:
+    init([any SkeletonParser], SkeletonFormatter) [7-10]
+    build(String) -> ProjectIndex [16-45]
+    query(ProjectIndex, String, Int) -> [QueryHit] [97-139]
+```
+
+- Parameter types only (no parameter names)
+- Return type after `->` (omitted if Void or unknown)
+- `[start-end]`: Line range within the file
+
+## Special markers
+
+| Marker | Meaning |
+|--------|---------|
+| `# parse_error <file>` | File failed to parse entirely |
+| `(!)` after type header | Block partially parsed (e.g., missing closing brace) |
+| `?` in line range | Line number unknown (e.g., `[?-?]`, `[3-?]`) |
+
+## Ordering
+
+- Files: sorted by path (ascending)
+- Blocks within a file: source order (order of appearance)
+- Properties and methods within a block: source order
+
+## Filtering by kind
+
+Use `--kinds` (MCP) or the `kinds` parameter to filter output to specific declaration types:
+
+Accepted values: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`
+
+Omit to include all kinds.
 """
 
-// MARK: - Claude Code
+// MARK: - references/mcp-setup.md
 
-private let claudeCodeSkillContent = """
----
-name: skeleton
-description: Get codebase skeleton (type declarations, methods, properties) to understand project architecture. Supports Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java. Use this to grasp the full picture of a project — all types, methods, and properties at a glance. Also run before launching an Explore agent to give it structural context.
-allowed-tools: Bash, Read, Task
----
+private let mcpSetupContent = """
+# MCP Server Setup
 
-\(sharedBody)
+## Configuration
 
-## Before Explore agents
+Add `.mcp.json` to your project root:
 
-When launching an Explore agent on a project, run `skltn get_skeleton` on that project root FIRST. Pass the skeleton result into the Explore agent's prompt so it has a structural map before exploring.
+```json
+{
+  "mcpServers": {
+    "skltn": {
+      "command": "skltn",
+      "args": ["mcp"]
+    }
+  }
+}
+```
 
-## When to use
+## Available tools
 
-- To grasp the full architecture of a project at a glance
-- Before launching an Explore agent on a project
-- When planning changes that span multiple modules
-- To understand module boundaries and public API surface
-- To quickly answer "what types/methods exist in this project?"
-"""
+### get_skeleton
 
-// MARK: - Codex
+Get declaration skeleton of a project or specific file.
 
-private let codexSkillContent = """
----
-name: skeleton
-description: Get codebase skeleton (type declarations, methods, properties) to understand project architecture. Supports Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java. Use this to grasp the full picture of a project — all types, methods, and properties at a glance. Run before code exploration to give structural context.
----
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_root` | string | Yes | Absolute path to the project root directory |
+| `path` | string | No | Relative file path to get skeleton for a specific file |
+| `kinds` | string[] | No | Filter by declaration kind: class, struct, enum, protocol, actor, extension |
 
-\(sharedBody)
+### query_symbols
 
-## Before code exploration
+Search for symbols (types, methods, properties) by name.
 
-When exploring an unfamiliar codebase, run `skltn get_skeleton` on the project root FIRST. Use the skeleton result as a structural map before diving into individual files.
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project_root` | string | Yes | Absolute path to the project root directory |
+| `query` | string | Yes | Search query string to match against symbol names |
+| `limit` | integer | No | Maximum number of results (default: 20) |
 
-## When to use
+Returns each hit on a new line: `header (file:startLine-endLine)`.
+Returns "No results found for: ..." when nothing matches.
 
-- To grasp the full architecture of a project at a glance
-- Before exploring an unfamiliar codebase
-- When planning changes that span multiple modules
-- To understand module boundaries and public API surface
-- To quickly answer "what types/methods exist in this project?"
+## When to use MCP vs CLI
+
+- **MCP tools**: Preferred when the MCP server is already connected. No Bash call needed, results come directly.
+- **CLI via Bash**: Use when MCP is not configured, or when you need to pipe output or combine with other shell commands.
+
+## JSON-RPC Daemon (advanced)
+
+For long-running sessions, use the daemon mode which maintains project indices in memory:
+
+```bash
+skltn daemon
+```
+
+Methods: `index.open`, `index.status`, `index.get_skeleton`, `index.update`, `index.query`, `index.diagnostics`
+
+Protocol: JSON-RPC 2.0 over stdin/stdout.
 """

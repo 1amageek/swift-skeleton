@@ -53,16 +53,31 @@ swift build -c release
 
 ## Agent Skill
 
-swift-skeleton provides a **Skill** for LLM coding agents (Claude Code, Codex). The skill gives the agent a structural overview of any project before it starts exploring files. Each tool gets a tailored SKILL.md — Claude Code's version references Explore agents, Codex's version uses generic exploration terminology.
+swift-skeleton ships with an [Agent Skill](https://docs.anthropic.com/en/docs/claude-code/skills) in [`SKILLS/skeleton/`](SKILLS/skeleton/). The skill teaches LLM coding agents (Claude Code, Codex) how to use skeleton extraction — giving the agent a structural overview of any project before it starts exploring files.
 
-### Setup
+```
+SKILLS/skeleton/
+├── SKILL.md                  # Core instructions
+└── references/
+    ├── output-format.md      # Output format specification
+    └── mcp-setup.md          # MCP server setup and tool parameters
+```
+
+### Install via CLI
 
 ```bash
-mint install 1amageek/swift-skeleton
 skltn install-skill
 ```
 
-This installs the skill to `~/.claude/skills/skeleton/` and `~/.codex/skills/skeleton/` (whichever tools are present).
+This copies the skill to `~/.claude/skills/skeleton/` and `~/.codex/skills/skeleton/` (whichever tools are present).
+
+### Manual install
+
+Copy the `SKILLS/skeleton/` folder to your tool's skills directory:
+
+```bash
+cp -r SKILLS/skeleton ~/.claude/skills/skeleton
+```
 
 ### Usage
 
