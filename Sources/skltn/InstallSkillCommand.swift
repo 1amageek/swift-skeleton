@@ -26,8 +26,8 @@ extension SkeletonIndexCLIMain {
             let outputFormatPath = "\(refsDir)/output-format.md"
             try outputFormatContent.write(toFile: outputFormatPath, atomically: true, encoding: .utf8)
 
-            let mcpSetupPath = "\(refsDir)/mcp-setup.md"
-            try mcpSetupContent.write(toFile: mcpSetupPath, atomically: true, encoding: .utf8)
+            let cliPath = "\(refsDir)/cli.md"
+            try cliContent.write(toFile: cliPath, atomically: true, encoding: .utf8)
 
             installed.append("\(target.name): \(target.dir)")
         }
@@ -60,13 +60,19 @@ Get a structural overview of any codebase — declarations without implementatio
 ### Step 2: Run the skeleton extraction
 
 ```bash
-skltn get_skeleton --project-root /absolute/path/to/project
+skltn skeleton /absolute/path/to/project
 ```
 
 To filter a single file:
 
 ```bash
-skltn get_skeleton --project-root /absolute/path/to/project --path Sources/MyFile.swift
+skltn skeleton /absolute/path/to/project --path Sources/MyFile.swift
+```
+
+To reduce large output before presenting it:
+
+```bash
+skltn skeleton /absolute/path/to/project --headers-only
 ```
 
 ### Step 3: Present the output
@@ -77,10 +83,21 @@ skltn get_skeleton --project-root /absolute/path/to/project --path Sources/MyFil
 ### Step 4: Search symbols (optional)
 
 ```bash
-skltn query --project-root /absolute/path/to/project --q "MyType" --limit 10
+skltn query /absolute/path/to/project --q "MyType" --limit 10
 ```
 
 Returns matching declarations with file path and line numbers (default limit: 20).
+
+## Useful CLI commands
+
+```bash
+skltn status /absolute/path/to/project
+skltn diagnostics /absolute/path/to/project
+skltn files /absolute/path/to/project
+skltn languages
+```
+
+Use `--language swift` to restrict scanning to a language. Use `--kind struct` or comma-separated `--kinds struct,actor` to filter declaration kinds.
 
 ## Reading the output
 
@@ -92,9 +109,9 @@ For the full output format specification, consult `references/output-format.md`.
 
 Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
 
-## MCP integration
+## CLI reference
 
-If the `skltn` MCP server is configured (via `.mcp.json`), you can also use `get_skeleton` and `query_symbols` tools directly without Bash. See `references/mcp-setup.md` for setup and tool parameters.
+For command details and filters, consult `references/cli.md`.
 
 ## Common issues
 
@@ -129,7 +146,7 @@ license: MIT
 compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
 metadata:
   author: 1amageek
-  mcp-server: skltn
+  interface: cli
 ---
 \(sharedSkillBody)
 """
@@ -144,7 +161,7 @@ license: MIT
 compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
 metadata:
   author: 1amageek
-  mcp-server: skltn
+  interface: cli
 ---
 \(sharedSkillBody)
 """
@@ -215,72 +232,59 @@ struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.
 
 ## Filtering by kind
 
-Use `--kinds` (MCP) or the `kinds` parameter to filter output to specific declaration types:
+Use `--kind` or `--kinds` to filter output to specific declaration types:
 
 Accepted values: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`
 
 Omit to include all kinds.
 """
 
-// MARK: - references/mcp-setup.md
+// MARK: - references/cli.md
 
-private let mcpSetupContent = """
-# MCP Server Setup
+private let cliContent = """
+# CLI Reference
 
-## Configuration
-
-Add `.mcp.json` to your project root:
-
-```json
-{
-  "mcpServers": {
-    "skltn": {
-      "command": "skltn",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-## Available tools
-
-### get_skeleton
-
-Get declaration skeleton of a project or specific file.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project_root` | string | Yes | Absolute path to the project root directory |
-| `path` | string | No | Relative file path to get skeleton for a specific file |
-| `kinds` | string[] | No | Filter by declaration kind: class, struct, enum, protocol, actor, extension |
-
-### query_symbols
-
-Search for symbols (types, methods, properties) by name.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project_root` | string | Yes | Absolute path to the project root directory |
-| `query` | string | Yes | Search query string to match against symbol names |
-| `limit` | integer | No | Maximum number of results (default: 20) |
-
-Returns each hit on a new line: `header (file:startLine-endLine)`.
-Returns "No results found for: ..." when nothing matches.
-
-## When to use MCP vs CLI
-
-- **MCP tools**: Preferred when the MCP server is already connected. No Bash call needed, results come directly.
-- **CLI via Bash**: Use when MCP is not configured, or when you need to pipe output or combine with other shell commands.
-
-## JSON-RPC Daemon (advanced)
-
-For long-running sessions, use the daemon mode which maintains project indices in memory:
+## Commands
 
 ```bash
-skltn daemon
+skltn skeleton [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
+skltn query [project-root] --q <string> [--limit <n>] [--language <name>]
+skltn status [project-root] [--language <name>]
+skltn diagnostics [project-root] [--language <name>]
+skltn files [project-root] [--language <name>]
+skltn languages
 ```
 
-Methods: `index.open`, `index.status`, `index.get_skeleton`, `index.update`, `index.query`, `index.diagnostics`
+If `project-root` is omitted, `skltn` uses the current working directory.
 
-Protocol: JSON-RPC 2.0 over stdin/stdout.
+## Aliases
+
+| Alias | Command |
+|-------|---------|
+| `get_skeleton` | `skeleton` |
+| `build` | `skeleton` |
+| `search` | `query` |
+| `diag` | `diagnostics` |
+
+## Filters
+
+`--language` restricts scanning to one or more languages. Repeat it or pass comma-separated values:
+
+```bash
+skltn skeleton . --language swift
+skltn skeleton . --languages swift,python
+```
+
+`--kind` and `--kinds` filter declarations after parsing:
+
+```bash
+skltn skeleton . --kind struct
+skltn skeleton . --kinds struct,actor,extension
+```
+
+Accepted kinds: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`.
+
+## Output Size
+
+Use `--headers-only` for a compact map when a repository is large. It keeps top-level declaration headers and parse markers, but omits properties and methods.
 """

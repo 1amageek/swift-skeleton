@@ -3,13 +3,15 @@ import SkeletonIndexCore
 
 public final actor SidecarService: SkeletonIndexService {
     private let executablePath: String
+    private let executableArguments: [String]
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
     private var nextRequestID = 1
 
-    public init(executablePath: String = "skeletonindexd") {
+    public init(executablePath: String = "skltn", arguments: [String] = ["daemon"]) {
         self.executablePath = executablePath
+        self.executableArguments = arguments
     }
 
     deinit {
@@ -128,7 +130,7 @@ public final actor SidecarService: SkeletonIndexService {
 
         let child = Process()
         child.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        child.arguments = [executablePath]
+        child.arguments = [executablePath] + executableArguments
 
         let inputPipe = Pipe()
         let outputPipe = Pipe()

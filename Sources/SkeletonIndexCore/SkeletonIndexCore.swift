@@ -14,6 +14,10 @@ public struct SkeletonIndexCore: Sendable {
     }
 
     public func build(projectRoot: String) throws -> ProjectIndex {
+        try build(projectRoot: projectRoot, languages: [])
+    }
+
+    public func build(projectRoot: String, languages: [String]) throws -> ProjectIndex {
         let rootURL = URL(fileURLWithPath: projectRoot).standardizedFileURL
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
@@ -21,8 +25,9 @@ public struct SkeletonIndexCore: Sendable {
             throw SkeletonError.invalidProjectRoot(projectRoot)
         }
 
+        let activeParsers = try parsers(for: languages)
         var files: [String: ParsedFile] = [:]
-        for relativePath in sourceFilePaths(rootURL: rootURL).sorted() {
+        for relativePath in sourceFilePaths(rootURL: rootURL, parsers: activeParsers).sorted() {
             let absoluteURL = rootURL.appendingPathComponent(relativePath)
             let source: String
             do {
@@ -30,7 +35,7 @@ public struct SkeletonIndexCore: Sendable {
             } catch {
                 throw SkeletonError.fileReadFailed(relativePath)
             }
-            guard let parser = parser(for: relativePath) else {
+            guard let parser = parser(for: relativePath, in: activeParsers) else {
                 continue
             }
             files[relativePath] = parser.parse(path: relativePath, source: source)
@@ -84,7 +89,7 @@ public struct SkeletonIndexCore: Sendable {
             } catch {
                 throw SkeletonError.fileReadFailed(normalizedPath)
             }
-            guard let parser = parser(for: normalizedPath) else {
+            guard let parser = parser(for: normalizedPath, in: parsers) else {
                 continue
             }
             index.files[normalizedPath] = parser.parse(path: normalizedPath, source: source)
@@ -166,7 +171,25 @@ public struct SkeletonIndexCore: Sendable {
         )
     }
 
-    private func parser(for path: String) -> (any SkeletonParser)? {
+    private func parsers(for languages: [String]) throws -> [any SkeletonParser] {
+        let normalizedLanguages = languages
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
+        guard !normalizedLanguages.isEmpty else {
+            return parsers
+        }
+
+        let supported = supportedLanguages
+        let unsupported = normalizedLanguages.filter { !supported.contains($0) }
+        if !unsupported.isEmpty {
+            throw SkeletonError.unsupportedLanguage(unsupported.joined(separator: ","))
+        }
+
+        return parsers.filter { normalizedLanguages.contains($0.languageName.lowercased()) }
+    }
+
+    private func parser(for path: String, in parsers: [any SkeletonParser]) -> (any SkeletonParser)? {
         let ext = URL(fileURLWithPath: path).pathExtension
         return parsers.first { $0.supportedExtensions.contains(ext) }
     }
@@ -186,7 +209,7 @@ public struct SkeletonIndexCore: Sendable {
         "/out/",
     ]
 
-    private func sourceFilePaths(rootURL: URL) -> [String] {
+    private func sourceFilePaths(rootURL: URL, parsers: [any SkeletonParser]) -> [String] {
         let allExtensions = parsers.reduce(into: Set<String>()) { $0.formUnion($1.supportedExtensions) }
 
         guard let enumerator = FileManager.default.enumerator(

@@ -6,7 +6,7 @@ license: MIT
 compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
 metadata:
   author: 1amageek
-  mcp-server: skltn
+  interface: cli
 ---
 
 # Skeleton
@@ -23,13 +23,19 @@ Get a structural overview of any codebase — declarations without implementatio
 ### Step 2: Run the skeleton extraction
 
 ```bash
-skltn get_skeleton --project-root /absolute/path/to/project
+skltn skeleton /absolute/path/to/project
 ```
 
 To filter a single file:
 
 ```bash
-skltn get_skeleton --project-root /absolute/path/to/project --path Sources/MyFile.swift
+skltn skeleton /absolute/path/to/project --path Sources/MyFile.swift
+```
+
+To reduce large output before presenting it:
+
+```bash
+skltn skeleton /absolute/path/to/project --headers-only
 ```
 
 ### Step 3: Present the output
@@ -40,10 +46,21 @@ skltn get_skeleton --project-root /absolute/path/to/project --path Sources/MyFil
 ### Step 4: Search symbols (optional)
 
 ```bash
-skltn query --project-root /absolute/path/to/project --q "MyType" --limit 10
+skltn query /absolute/path/to/project --q "MyType" --limit 10
 ```
 
 Returns matching declarations with file path and line numbers (default limit: 20).
+
+## Useful CLI commands
+
+```bash
+skltn status /absolute/path/to/project
+skltn diagnostics /absolute/path/to/project
+skltn files /absolute/path/to/project
+skltn languages
+```
+
+Use `--language swift` to restrict scanning to a language. Use `--kind struct` or comma-separated `--kinds struct,actor` to filter declaration kinds.
 
 ## Reading the output
 
@@ -55,9 +72,9 @@ For the full output format specification, consult `references/output-format.md`.
 
 Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
 
-## MCP integration
+## CLI reference
 
-If the `skltn` MCP server is configured (via `.mcp.json`), you can also use `get_skeleton` and `query_symbols` tools directly without Bash. See `references/mcp-setup.md` for setup and tool parameters.
+For command details and filters, consult `references/cli.md`.
 
 ## Common issues
 

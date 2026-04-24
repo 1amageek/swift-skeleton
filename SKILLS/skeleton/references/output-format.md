@@ -61,7 +61,7 @@ struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.
 
 ## Filtering by kind
 
-Use `--kinds` (MCP) or the `kinds` parameter to filter output to specific declaration types:
+Use `--kind` or `--kinds` to filter output to specific declaration types:
 
 Accepted values: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`
 

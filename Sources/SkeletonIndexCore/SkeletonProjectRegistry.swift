@@ -10,12 +10,7 @@ public actor SkeletonProjectRegistry {
     }
 
     public func open(projectRoot: String, languages: [String]) throws -> OpenResult {
-        let supported = core.supportedLanguages
-        let unsupported = languages.filter { !supported.contains($0) }
-        if !unsupported.isEmpty {
-            throw SkeletonError.unsupportedLanguage(unsupported.joined(separator: ","))
-        }
-        let index = try core.build(projectRoot: projectRoot)
+        let index = try core.build(projectRoot: projectRoot, languages: languages)
         let projectID = UUID().uuidString.lowercased()
         projects[projectID] = index
         return OpenResult(projectID: projectID, status: core.status(index: index))

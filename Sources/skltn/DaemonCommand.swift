@@ -62,7 +62,7 @@ private func handle(line: String, registry: SkeletonProjectRegistry) async -> [S
         switch method {
         case "index.open":
             let projectRoot = try requireString(params, key: "project_root")
-            let languages = params["languages"] as? [String] ?? ["swift"]
+            let languages = params["languages"] as? [String] ?? []
             let openResult = try await registry.open(projectRoot: projectRoot, languages: languages)
             result = [
                 "project_id": openResult.projectID,

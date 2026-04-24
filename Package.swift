@@ -67,7 +67,6 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/tree-sitter/swift-tree-sitter.git", from: "0.9.0"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.7.1"),
     ],
     targets: [
         // MARK: - Core
@@ -225,7 +224,6 @@ let package = Package(
                 .target(name: "SkeletonCppParser", condition: .when(traits: ["cpp"])),
                 .target(name: "SkeletonPythonParser", condition: .when(traits: ["python"])),
                 .target(name: "SkeletonJavaParser", condition: .when(traits: ["java"])),
-                .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
 
@@ -273,6 +271,9 @@ let package = Package(
             name: "SkeletonJavaParserTests",
             dependencies: ["SkeletonJavaParser"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "SkeletonCLIE2ETests"
         ),
     ]
 )

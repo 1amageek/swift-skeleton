@@ -59,8 +59,8 @@ swift-skeleton ships with an [Agent Skill](https://docs.anthropic.com/en/docs/cl
 SKILLS/skeleton/
 ├── SKILL.md                  # Core instructions
 └── references/
-    ├── output-format.md      # Output format specification
-    └── mcp-setup.md          # MCP server setup and tool parameters
+    ├── cli.md                # CLI commands and filters
+    └── output-format.md      # Output format specification
 ```
 
 ### Install via CLI
@@ -88,70 +88,39 @@ cp -r SKILLS/skeleton ~/.claude/skills/skeleton
 # The agent can also invoke it automatically before code exploration
 ```
 
-## MCP Server
-
-Runs as an [MCP](https://modelcontextprotocol.io) server so Claude Code can query codebase structure directly.
-
-### Setup
-
-Add `.mcp.json` to your project root:
-
-```json
-{
-  "mcpServers": {
-    "skltn": {
-      "command": "skltn",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Tools
-
-#### `get_skeleton`
-
-Get declaration skeleton of a project or specific file.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project_root` | `string` | Yes | Absolute path to the project root |
-| `path` | `string` | No | Relative file path to filter by |
-| `kinds` | `string[]` | No | Filter by declaration kind |
-
-`kinds` accepts: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`. Omit to include all.
-
-#### `query_symbols`
-
-Search symbols by name.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project_root` | `string` | Yes | Absolute path to the project root |
-| `query` | `string` | Yes | Search string |
-| `limit` | `integer` | No | Max results (default: 20) |
-
 ## CLI
 
 ```bash
 # Full project skeleton
-skltn get_skeleton --project-root /path/to/project
+skltn skeleton /path/to/project
 
 # Single file skeleton
-skltn get_skeleton --project-root /path/to/project --path Sources/MyFile.swift
+skltn skeleton /path/to/project --path Sources/MyFile.swift
+
+# Compact project map
+skltn skeleton /path/to/project --headers-only
+
+# Filter by language or declaration kind
+skltn skeleton /path/to/project --language swift
+skltn skeleton /path/to/project --kinds struct,actor
 
 # Symbol search
-skltn query --project-root /path/to/project --q "MyClass" --limit 10
+skltn query /path/to/project --q "MyClass" --limit 10
+
+# Project status and diagnostics
+skltn status /path/to/project
+skltn diagnostics /path/to/project
+skltn files /path/to/project
+skltn languages
 
 # Install agent skill (Claude Code / Codex)
 skltn install-skill
 
 # JSON-RPC daemon (stdin/stdout)
 skltn daemon
-
-# MCP server (stdin/stdout)
-skltn mcp
 ```
+
+`get_skeleton` and `build` are aliases for `skeleton`. `search` is an alias for `query`, and `diag` is an alias for `diagnostics`.
 
 ## Architecture
 
@@ -167,7 +136,7 @@ SkeletonCppParser          C++ parser (Tree-sitter)
 SkeletonPythonParser       Python parser (indent-based AST)
 SkeletonJavaParser         Java parser (Tree-sitter)
 SkeletonIndexClient        EmbeddedService / SidecarService
-skltn                      CLI / Daemon / MCP server (unified executable)
+skltn                      CLI / JSON-RPC daemon
 ```
 
 The core has zero dependency on Tree-sitter. Parsers are injected via the `SkeletonParser` protocol.
@@ -210,9 +179,9 @@ let hits = core.query(index: index, q: "MyType", limit: 10)
 ```swift
 import SkeletonIndexClient
 
-let service = SidecarService(executablePath: "skltn")
+let service = SidecarService()
 let result = try await service.open(projectRoot: "/path/to/project", languages: ["swift"])
-let skeleton = try await service.getSkeleton(projectID: result.projectID)
+let skeleton = try await service.getSkeleton(projectID: result.projectID, path: nil)
 ```
 
 ### JSON-RPC Daemon
