@@ -1,98 +1,80 @@
 ---
 name: skeleton
-description: Understand the overall structure and architecture of a codebase. Extracts all type declarations, method signatures, properties, and inheritance relationships into a compact skeleton. Use when user asks about project architecture, says "show me the structure", wants to explore an unfamiliar codebase, or is planning multi-module changes. Also use before launching an Explore agent to give it a structural map.
-allowed-tools: Bash, Read, Task
-license: MIT
-compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
-metadata:
-  author: 1amageek
-  interface: cli
+description: Extract and navigate a compact structural map of a codebase with the skltn CLI, including declaration headers, typed properties, method signatures, inheritance, source paths, and line ranges. Use when exploring project architecture, locating symbols, reviewing an unfamiliar repository, or planning changes across files or modules.
 ---
 
 # Skeleton
 
-Get a structural overview of any codebase — declarations without implementations.
+Use `skltn` to inspect declarations without loading implementation bodies.
 
-## Instructions
+## Workflow
 
-### Step 1: Determine the project root
+### 1. Resolve the project root
 
-- If `$ARGUMENTS` contains a path, use it
-- Otherwise use the current working directory
+Use the path supplied by the user. If no path is supplied, use the current working directory.
 
-### Step 2: Run the skeleton extraction
+### 2. Build a structural map
 
 ```bash
-skltn skeleton /absolute/path/to/project
+skltn skeleton [project-root] [options]
 ```
 
-To filter a single file:
+For a large repository, start with `--headers-only`. Use `--path <relative-file>` for one indexed file, `--language <name>` to restrict parsers, and `--kind <kind>` to restrict supported declaration kinds.
+
+The `skeleton` command may be omitted. `get_skeleton` and `build` are aliases.
+
+### 3. Search indexed declarations
 
 ```bash
-skltn skeleton /absolute/path/to/project --path Sources/MyFile.swift
+skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 ```
 
-To reduce large output before presenting it:
+`search` is an alias. The default limit is 20. A match inside a property or method returns the enclosing declaration block header and that block's file range.
+
+### 4. Present results
+
+- Use unindented declaration headers as the structural overview.
+- Treat unindented `# parse_error` lines as diagnostics, not declarations.
+- Preserve file paths and ranges so the user can open the original source.
+- If full output is too large, rerun with `--headers-only` and report that the compact view omits properties and methods.
+
+## Inspection commands
 
 ```bash
-skltn skeleton /absolute/path/to/project --headers-only
-```
-
-### Step 3: Present the output
-
-- Show the skeleton as a structural overview
-- If the output exceeds 2000 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
-
-### Step 4: Search symbols (optional)
-
-```bash
-skltn query /absolute/path/to/project --q "MyType" --limit 10
-```
-
-Returns matching declarations with file path and line numbers (default limit: 20).
-
-## Useful CLI commands
-
-```bash
-skltn status /absolute/path/to/project
-skltn diagnostics /absolute/path/to/project
-skltn files /absolute/path/to/project
+skltn status [project-root] [--language <name>]
+skltn diagnostics [project-root] [--language <name>]
+skltn files [project-root] [--language <name>]
 skltn languages
 ```
 
-Use `--language swift` to restrict scanning to a language. Use `--kind struct` or comma-separated `--kinds struct,actor` to filter declaration kinds.
+Use `status` for index counts, `diagnostics` for parse errors and incomplete blocks, `files` for sorted indexed paths, and `languages` for parsers included in the installed binary.
 
-## Reading the output
+## Filters
 
-Top-level lines (no indent) are type declarations — use these for summaries. Indented lines show properties and methods with their signatures and line ranges.
+Language filters accept repeated flags or comma-separated values. The default build supports `swift`, `kotlin`, `typescript`, `go`, `zig`, `rust`, `cpp`, `python`, and `java`; the actual installed set is authoritative from `skltn languages`.
 
-For the full output format specification, consult `references/output-format.md`.
+Kind filters accept `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. Parsers can emit additional language-specific header kinds, but the CLI does not accept those additional kinds as filter values.
 
-## Supported languages
+## Output and diagnostics
 
-Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+Indented lines contain typed properties and method signatures. Return types are printed whenever the parser extracts one, including `Void` or `void`.
 
-## CLI reference
+`# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
 
-For command details and filters, consult `references/cli.md`.
+Read `references/output-format.md` for the output contract and `references/cli.md` for the complete command and option reference.
 
-## Common issues
+## CLI availability
 
-### skltn command not found
-
-Install via Mint:
+If `skltn` is unavailable, install it with Mint:
 
 ```bash
 mint install 1amageek/swift-skeleton
 ```
 
-Or build from source:
+To build from source:
 
 ```bash
 git clone https://github.com/1amageek/swift-skeleton.git
-cd swift-skeleton && swift build -c release
+cd swift-skeleton
+swift build -c release
 ```
-
-### parse_error or (!) in output
-
-These are expected for files with syntax errors. The skeleton continues processing — partial results are still usable. `# parse_error` means a file failed entirely. `(!)` means a block was partially parsed (e.g., missing closing brace).

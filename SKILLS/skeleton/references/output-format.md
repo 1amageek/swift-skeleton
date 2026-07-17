@@ -2,67 +2,59 @@
 
 ## Structure
 
-```
-<kind> <Name>[: Conformances] [<file>:<start>-<end>]
+```text
+<kind> <Name>[: Inheritance] [<file>:<start>-<end>] [(!)]
   props: <name>:<Type>, ...
   methods:
-    <name>(<ParamTypes>) [-> ReturnType] [<start>-<end>]
+    <name>(<ParamTypes>) [-> <ReturnType>] [<start>-<end>]
 ```
 
-## Line types
+## Declaration headers
 
-### Type header (no indent)
+Headers are unindented and contain the parser-provided declaration keyword, name, optional inheritance or conformance list, project-relative file path, and line range.
 
-```
-struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.swift:3-246]
-```
+The current parsers can emit these header kinds:
 
-- `<kind>`: class, struct, enum, protocol, actor, extension
-- `<Name>`: Type name
-- `: Conformances`: Inheritance and protocol conformance (omitted if none)
-- `[file:start-end]`: Source file path and line range
+| Languages | Kinds |
+|---|---|
+| Swift | `class`, `struct`, `enum`, `protocol`, `actor`, `extension` |
+| Kotlin | `class`, `interface`, `object`, `enum` |
+| TypeScript | `class`, `interface`, `enum`, `type` |
+| Go | `struct`, `interface`, `type` |
+| Zig | `struct`, `enum`, `union` |
+| Rust | `struct`, `enum`, `trait`, `union`, `extension` |
+| C++ | `class`, `struct`, `union` |
+| Python | `class` |
+| Java | `class`, `interface`, `enum`, `record`, `annotation` |
 
-### Properties
+Inheritance and conformance text is omitted when empty.
 
-```
-  props: parsers:[any SkeletonParser], formatter:SkeletonFormatter
-```
+## Properties
 
-- Comma-separated list of `name:Type` pairs
-- Only properties with explicit type annotations are shown
-- Omitted entirely if none
+Properties are emitted as a comma-separated `name:type` line. Only properties for which a parser extracts an explicit type are included. The entire line is omitted when the declaration has no extracted properties.
 
-### Methods
+## Methods
 
-```
-  methods:
-    init([any SkeletonParser], SkeletonFormatter) [7-10]
-    build(String) -> ProjectIndex [16-45]
-    query(ProjectIndex, String, Int) -> [QueryHit] [97-139]
-```
+Methods include parameter types without parameter names. Unknown parameter types use `?`. Initializers use `init` and omit a return type.
 
-- Parameter types only (no parameter names)
-- Return type after `->` (omitted if Void or unknown)
-- `[start-end]`: Line range within the file
+A parsed return type is emitted after `->`, including `Void` and `void`. The return segment is omitted when the parser does not extract a return type.
+
+Method ranges are relative to the containing file.
 
 ## Special markers
 
 | Marker | Meaning |
-|--------|---------|
-| `# parse_error <file>` | File failed to parse entirely |
-| `(!)` after type header | Block partially parsed (e.g., missing closing brace) |
-| `?` in line range | Line number unknown (e.g., `[?-?]`, `[3-?]`) |
+|---|---|
+| `# parse_error <file>` | The file contains a parse error or could not be parsed normally; partial declarations may still be present. |
+| `(!)` | The declaration block contains a parser error node and may be incomplete. |
+| `?` | A parameter type or line position is unknown. |
 
 ## Ordering
 
-- Files: sorted by path (ascending)
-- Blocks within a file: source order (order of appearance)
-- Properties and methods within a block: source order
+- Files are sorted by path in ascending order.
+- Blocks within a file remain in source order.
+- Properties and methods within a block remain in source order.
 
-## Filtering by kind
+## Kind filtering
 
-Use `--kind` or `--kinds` to filter output to specific declaration types:
-
-Accepted values: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`
-
-Omit to include all kinds.
+The CLI accepts only `class`, `struct`, `enum`, `protocol`, `actor`, and `extension` as `--kind` or `--kinds` values. Omit kind filtering to retain language-specific kinds outside this set.

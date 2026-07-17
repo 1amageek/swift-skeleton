@@ -2,44 +2,74 @@
 
 ## Commands
 
-```bash
-skltn skeleton [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
-skltn query [project-root] --q <string> [--limit <n>] [--language <name>]
-skltn status [project-root] [--language <name>]
-skltn diagnostics [project-root] [--language <name>]
-skltn files [project-root] [--language <name>]
+```text
+skltn [skeleton] [project-root] [skeleton-options]
+skltn query [project-root] --q <text> [query-options]
+skltn query [project-root] <text> [query-options]
+skltn status [project-root] [language-options]
+skltn diagnostics [project-root] [language-options]
+skltn files [project-root] [language-options]
 skltn languages
+skltn daemon
+skltn install-skill
+skltn help
+skltn --help
+skltn -h
 ```
 
-If `project-root` is omitted, `skltn` uses the current working directory.
+If `project-root` is omitted, commands use the current working directory. The project root may also be passed with `--project-root` or `--root`.
 
-## Aliases
+An unrecognized first positional token is treated as the project root for the default `skeleton` command.
+
+## Command aliases
 
 | Alias | Command |
-|-------|---------|
+|---|---|
 | `get_skeleton` | `skeleton` |
 | `build` | `skeleton` |
 | `search` | `query` |
 | `diag` | `diagnostics` |
 
-## Filters
+## Skeleton options
 
-`--language` restricts scanning to one or more languages. Repeat it or pass comma-separated values:
+| Option | Aliases | Behavior |
+|---|---|---|
+| `--project-root <path>` | `--root` | Select the project directory instead of using a positional path. |
+| `--path <path>` | `--file` | Return one indexed file using its project-relative or absolute path. |
+| `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
+| `--kind <kind>` | `--kinds` | Keep selected declaration kinds after parsing. |
+| `--headers-only` | — | Keep declaration headers and parse markers; omit properties and methods. |
 
-```bash
-skltn skeleton . --language swift
-skltn skeleton . --languages swift,python
-```
+Language and kind options may be repeated or supplied as comma-separated values. Value options also accept the `--option=value` form.
 
-`--kind` and `--kinds` filter declarations after parsing:
+Accepted kind filter values are `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. This list is narrower than the language-specific keywords that parsers can emit in headers.
 
-```bash
-skltn skeleton . --kind struct
-skltn skeleton . --kinds struct,actor,extension
-```
+## Query options and forms
 
-Accepted kinds: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`.
+| Option | Alias | Behavior |
+|---|---|---|
+| `--q <text>` | `--query` | Set the case-insensitive search text. |
+| `--limit <count>` | — | Limit returned declaration blocks; defaults to 20. |
+| `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
 
-## Output Size
+With `--q`, the first remaining positional value is the project root. Without `--q`, two positional values mean project root followed by search text; one positional value means search text in the current working directory.
 
-Use `--headers-only` for a compact map when a repository is large. It keeps top-level declaration headers and parse markers, but omits properties and methods.
+Query searches declaration headers, inheritance, typed properties, method names, parameter types, and return types. Each result is the enclosing declaration block header with the block's file and range.
+
+## Inspection commands
+
+- `status` prints `files_indexed`, `parse_error_files`, `last_update_ts`, and `is_watching`.
+- `diagnostics` prints `No diagnostics.` or `parse_error:` and `incomplete:` entries.
+- `files` prints indexed project-relative paths in ascending order.
+- `languages` prints parser names compiled into the executable in ascending order.
+
+`status`, `diagnostics`, and `files` accept the project-root and language options described above.
+
+## Process commands
+
+- `daemon` starts the JSON-RPC 2.0 loop on standard input and standard output.
+- `install-skill` installs this skill for detected Claude Code and Codex directories.
+
+## Output size
+
+Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` markers.

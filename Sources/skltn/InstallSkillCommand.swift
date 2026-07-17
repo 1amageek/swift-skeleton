@@ -5,9 +5,9 @@ extension SkeletonIndexCLIMain {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
 
-        let targets: [(name: String, dir: String, skillContent: String)] = [
-            ("Claude Code", "\(home)/.claude/skills/skeleton", claudeCodeSkillContent),
-            ("Codex", "\(home)/.codex/skills/skeleton", codexSkillContent),
+        let targets: [(name: String, dir: String)] = [
+            ("Claude Code", "\(home)/.claude/skills/skeleton"),
+            ("Codex", "\(home)/.codex/skills/skeleton"),
         ]
 
         var installed: [String] = []
@@ -21,7 +21,7 @@ extension SkeletonIndexCLIMain {
             try fm.createDirectory(atPath: refsDir, withIntermediateDirectories: true)
 
             let skillPath = "\(target.dir)/SKILL.md"
-            try target.skillContent.write(toFile: skillPath, atomically: true, encoding: .utf8)
+            try skillContent.write(toFile: skillPath, atomically: true, encoding: .utf8)
 
             let outputFormatPath = "\(refsDir)/output-format.md"
             try outputFormatContent.write(toFile: outputFormatPath, atomically: true, encoding: .utf8)
@@ -42,128 +42,89 @@ extension SkeletonIndexCLIMain {
     }
 }
 
-// MARK: - Shared SKILL.md body
+// MARK: - SKILL.md
 
-private let sharedSkillBody = """
+private let skillContent = """
+---
+name: skeleton
+description: Extract and navigate a compact structural map of a codebase with the skltn CLI, including declaration headers, typed properties, method signatures, inheritance, source paths, and line ranges. Use when exploring project architecture, locating symbols, reviewing an unfamiliar repository, or planning changes across files or modules.
+---
 
 # Skeleton
 
-Get a structural overview of any codebase — declarations without implementations.
+Use `skltn` to inspect declarations without loading implementation bodies.
 
-## Instructions
+## Workflow
 
-### Step 1: Determine the project root
+### 1. Resolve the project root
 
-- If `$ARGUMENTS` contains a path, use it
-- Otherwise use the current working directory
+Use the path supplied by the user. If no path is supplied, use the current working directory.
 
-### Step 2: Run the skeleton extraction
+### 2. Build a structural map
 
 ```bash
-skltn skeleton /absolute/path/to/project
+skltn skeleton [project-root] [options]
 ```
 
-To filter a single file:
+For a large repository, start with `--headers-only`. Use `--path <relative-file>` for one indexed file, `--language <name>` to restrict parsers, and `--kind <kind>` to restrict supported declaration kinds.
+
+The `skeleton` command may be omitted. `get_skeleton` and `build` are aliases.
+
+### 3. Search indexed declarations
 
 ```bash
-skltn skeleton /absolute/path/to/project --path Sources/MyFile.swift
+skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 ```
 
-To reduce large output before presenting it:
+`search` is an alias. The default limit is 20. A match inside a property or method returns the enclosing declaration block header and that block's file range.
+
+### 4. Present results
+
+- Use unindented declaration headers as the structural overview.
+- Treat unindented `# parse_error` lines as diagnostics, not declarations.
+- Preserve file paths and ranges so the user can open the original source.
+- If full output is too large, rerun with `--headers-only` and report that the compact view omits properties and methods.
+
+## Inspection commands
 
 ```bash
-skltn skeleton /absolute/path/to/project --headers-only
-```
-
-### Step 3: Present the output
-
-- Show the skeleton as a structural overview
-- If the output exceeds 2000 lines, summarize by showing only type headers (lines not starting with spaces) and note the full line count
-
-### Step 4: Search symbols (optional)
-
-```bash
-skltn query /absolute/path/to/project --q "MyType" --limit 10
-```
-
-Returns matching declarations with file path and line numbers (default limit: 20).
-
-## Useful CLI commands
-
-```bash
-skltn status /absolute/path/to/project
-skltn diagnostics /absolute/path/to/project
-skltn files /absolute/path/to/project
+skltn status [project-root] [--language <name>]
+skltn diagnostics [project-root] [--language <name>]
+skltn files [project-root] [--language <name>]
 skltn languages
 ```
 
-Use `--language swift` to restrict scanning to a language. Use `--kind struct` or comma-separated `--kinds struct,actor` to filter declaration kinds.
+Use `status` for index counts, `diagnostics` for parse errors and incomplete blocks, `files` for sorted indexed paths, and `languages` for parsers included in the installed binary.
 
-## Reading the output
+## Filters
 
-Top-level lines (no indent) are type declarations — use these for summaries. Indented lines show properties and methods with their signatures and line ranges.
+Language filters accept repeated flags or comma-separated values. The default build supports `swift`, `kotlin`, `typescript`, `go`, `zig`, `rust`, `cpp`, `python`, and `java`; the actual installed set is authoritative from `skltn languages`.
 
-For the full output format specification, consult `references/output-format.md`.
+Kind filters accept `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. Parsers can emit additional language-specific header kinds, but the CLI does not accept those additional kinds as filter values.
 
-## Supported languages
+## Output and diagnostics
 
-Swift, Kotlin, TypeScript, Go, Zig, Rust, C++, Python, Java
+Indented lines contain typed properties and method signatures. Return types are printed whenever the parser extracts one, including `Void` or `void`.
 
-## CLI reference
+`# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
 
-For command details and filters, consult `references/cli.md`.
+Read `references/output-format.md` for the output contract and `references/cli.md` for the complete command and option reference.
 
-## Common issues
+## CLI availability
 
-### skltn command not found
-
-Install via Mint:
+If `skltn` is unavailable, install it with Mint:
 
 ```bash
 mint install 1amageek/swift-skeleton
 ```
 
-Or build from source:
+To build from source:
 
 ```bash
 git clone https://github.com/1amageek/swift-skeleton.git
-cd swift-skeleton && swift build -c release
+cd swift-skeleton
+swift build -c release
 ```
-
-### parse_error or (!) in output
-
-These are expected for files with syntax errors. The skeleton continues processing — partial results are still usable. `# parse_error` means a file failed entirely. `(!)` means a block was partially parsed (e.g., missing closing brace).
-"""
-
-// MARK: - Claude Code
-
-private let claudeCodeSkillContent = """
----
-name: skeleton
-description: Understand the overall structure and architecture of a codebase. Extracts all type declarations, method signatures, properties, and inheritance relationships into a compact skeleton. Use when user asks about project architecture, says "show me the structure", wants to explore an unfamiliar codebase, or is planning multi-module changes. Also use before launching an Explore agent to give it a structural map.
-allowed-tools: Bash, Read, Task
-license: MIT
-compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
-metadata:
-  author: 1amageek
-  interface: cli
----
-\(sharedSkillBody)
-"""
-
-// MARK: - Codex
-
-private let codexSkillContent = """
----
-name: skeleton
-description: Understand the overall structure and architecture of a codebase. Extracts all type declarations, method signatures, properties, and inheritance relationships into a compact skeleton. Use when user asks about project architecture, says "show me the structure", wants to explore an unfamiliar codebase, or is planning multi-module changes. Also use before spawning an explorer agent to give it a structural map.
-license: MIT
-compatibility: Requires skltn CLI installed via `mint install 1amageek/swift-skeleton` or built from source. macOS 13+, Swift 6.2+.
-metadata:
-  author: 1amageek
-  interface: cli
----
-\(sharedSkillBody)
 """
 
 // MARK: - references/output-format.md
@@ -173,70 +134,62 @@ private let outputFormatContent = """
 
 ## Structure
 
-```
-<kind> <Name>[: Conformances] [<file>:<start>-<end>]
+```text
+<kind> <Name>[: Inheritance] [<file>:<start>-<end>] [(!)]
   props: <name>:<Type>, ...
   methods:
-    <name>(<ParamTypes>) [-> ReturnType] [<start>-<end>]
+    <name>(<ParamTypes>) [-> <ReturnType>] [<start>-<end>]
 ```
 
-## Line types
+## Declaration headers
 
-### Type header (no indent)
+Headers are unindented and contain the parser-provided declaration keyword, name, optional inheritance or conformance list, project-relative file path, and line range.
 
-```
-struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.swift:3-246]
-```
+The current parsers can emit these header kinds:
 
-- `<kind>`: class, struct, enum, protocol, actor, extension
-- `<Name>`: Type name
-- `: Conformances`: Inheritance and protocol conformance (omitted if none)
-- `[file:start-end]`: Source file path and line range
+| Languages | Kinds |
+|---|---|
+| Swift | `class`, `struct`, `enum`, `protocol`, `actor`, `extension` |
+| Kotlin | `class`, `interface`, `object`, `enum` |
+| TypeScript | `class`, `interface`, `enum`, `type` |
+| Go | `struct`, `interface`, `type` |
+| Zig | `struct`, `enum`, `union` |
+| Rust | `struct`, `enum`, `trait`, `union`, `extension` |
+| C++ | `class`, `struct`, `union` |
+| Python | `class` |
+| Java | `class`, `interface`, `enum`, `record`, `annotation` |
 
-### Properties
+Inheritance and conformance text is omitted when empty.
 
-```
-  props: parsers:[any SkeletonParser], formatter:SkeletonFormatter
-```
+## Properties
 
-- Comma-separated list of `name:Type` pairs
-- Only properties with explicit type annotations are shown
-- Omitted entirely if none
+Properties are emitted as a comma-separated `name:type` line. Only properties for which a parser extracts an explicit type are included. The entire line is omitted when the declaration has no extracted properties.
 
-### Methods
+## Methods
 
-```
-  methods:
-    init([any SkeletonParser], SkeletonFormatter) [7-10]
-    build(String) -> ProjectIndex [16-45]
-    query(ProjectIndex, String, Int) -> [QueryHit] [97-139]
-```
+Methods include parameter types without parameter names. Unknown parameter types use `?`. Initializers use `init` and omit a return type.
 
-- Parameter types only (no parameter names)
-- Return type after `->` (omitted if Void or unknown)
-- `[start-end]`: Line range within the file
+A parsed return type is emitted after `->`, including `Void` and `void`. The return segment is omitted when the parser does not extract a return type.
+
+Method ranges are relative to the containing file.
 
 ## Special markers
 
 | Marker | Meaning |
-|--------|---------|
-| `# parse_error <file>` | File failed to parse entirely |
-| `(!)` after type header | Block partially parsed (e.g., missing closing brace) |
-| `?` in line range | Line number unknown (e.g., `[?-?]`, `[3-?]`) |
+|---|---|
+| `# parse_error <file>` | The file contains a parse error or could not be parsed normally; partial declarations may still be present. |
+| `(!)` | The declaration block contains a parser error node and may be incomplete. |
+| `?` | A parameter type or line position is unknown. |
 
 ## Ordering
 
-- Files: sorted by path (ascending)
-- Blocks within a file: source order (order of appearance)
-- Properties and methods within a block: source order
+- Files are sorted by path in ascending order.
+- Blocks within a file remain in source order.
+- Properties and methods within a block remain in source order.
 
-## Filtering by kind
+## Kind filtering
 
-Use `--kind` or `--kinds` to filter output to specific declaration types:
-
-Accepted values: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`
-
-Omit to include all kinds.
+The CLI accepts only `class`, `struct`, `enum`, `protocol`, `actor`, and `extension` as `--kind` or `--kinds` values. Omit kind filtering to retain language-specific kinds outside this set.
 """
 
 // MARK: - references/cli.md
@@ -246,45 +199,75 @@ private let cliContent = """
 
 ## Commands
 
-```bash
-skltn skeleton [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
-skltn query [project-root] --q <string> [--limit <n>] [--language <name>]
-skltn status [project-root] [--language <name>]
-skltn diagnostics [project-root] [--language <name>]
-skltn files [project-root] [--language <name>]
+```text
+skltn [skeleton] [project-root] [skeleton-options]
+skltn query [project-root] --q <text> [query-options]
+skltn query [project-root] <text> [query-options]
+skltn status [project-root] [language-options]
+skltn diagnostics [project-root] [language-options]
+skltn files [project-root] [language-options]
 skltn languages
+skltn daemon
+skltn install-skill
+skltn help
+skltn --help
+skltn -h
 ```
 
-If `project-root` is omitted, `skltn` uses the current working directory.
+If `project-root` is omitted, commands use the current working directory. The project root may also be passed with `--project-root` or `--root`.
 
-## Aliases
+An unrecognized first positional token is treated as the project root for the default `skeleton` command.
+
+## Command aliases
 
 | Alias | Command |
-|-------|---------|
+|---|---|
 | `get_skeleton` | `skeleton` |
 | `build` | `skeleton` |
 | `search` | `query` |
 | `diag` | `diagnostics` |
 
-## Filters
+## Skeleton options
 
-`--language` restricts scanning to one or more languages. Repeat it or pass comma-separated values:
+| Option | Aliases | Behavior |
+|---|---|---|
+| `--project-root <path>` | `--root` | Select the project directory instead of using a positional path. |
+| `--path <path>` | `--file` | Return one indexed file using its project-relative or absolute path. |
+| `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
+| `--kind <kind>` | `--kinds` | Keep selected declaration kinds after parsing. |
+| `--headers-only` | — | Keep declaration headers and parse markers; omit properties and methods. |
 
-```bash
-skltn skeleton . --language swift
-skltn skeleton . --languages swift,python
-```
+Language and kind options may be repeated or supplied as comma-separated values. Value options also accept the `--option=value` form.
 
-`--kind` and `--kinds` filter declarations after parsing:
+Accepted kind filter values are `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. This list is narrower than the language-specific keywords that parsers can emit in headers.
 
-```bash
-skltn skeleton . --kind struct
-skltn skeleton . --kinds struct,actor,extension
-```
+## Query options and forms
 
-Accepted kinds: `class`, `struct`, `enum`, `protocol`, `actor`, `extension`.
+| Option | Alias | Behavior |
+|---|---|---|
+| `--q <text>` | `--query` | Set the case-insensitive search text. |
+| `--limit <count>` | — | Limit returned declaration blocks; defaults to 20. |
+| `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
 
-## Output Size
+With `--q`, the first remaining positional value is the project root. Without `--q`, two positional values mean project root followed by search text; one positional value means search text in the current working directory.
 
-Use `--headers-only` for a compact map when a repository is large. It keeps top-level declaration headers and parse markers, but omits properties and methods.
+Query searches declaration headers, inheritance, typed properties, method names, parameter types, and return types. Each result is the enclosing declaration block header with the block's file and range.
+
+## Inspection commands
+
+- `status` prints `files_indexed`, `parse_error_files`, `last_update_ts`, and `is_watching`.
+- `diagnostics` prints `No diagnostics.` or `parse_error:` and `incomplete:` entries.
+- `files` prints indexed project-relative paths in ascending order.
+- `languages` prints parser names compiled into the executable in ascending order.
+
+`status`, `diagnostics`, and `files` accept the project-root and language options described above.
+
+## Process commands
+
+- `daemon` starts the JSON-RPC 2.0 loop on standard input and standard output.
+- `install-skill` installs this skill for detected Claude Code and Codex directories.
+
+## Output size
+
+Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` markers.
 """
