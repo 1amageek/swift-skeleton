@@ -30,6 +30,14 @@ public struct SkeletonFormatter: Sendable {
     }
 
     public func header(for block: SkeletonBlock, filePath: String) -> String {
+        header(for: block, filePath: filePath, findings: [])
+    }
+
+    public func header(
+        for block: SkeletonBlock,
+        filePath: String,
+        findings: [ImplementationFinding]
+    ) -> String {
         let inheritance = block.inheritance.isEmpty ? "" : ": \(block.inheritance.joined(separator: ", "))"
         let rangeText = "\(lineNumber(block.range.startLine))-\(lineNumber(block.range.endLine))"
         let base: String
@@ -40,7 +48,9 @@ public struct SkeletonFormatter: Sendable {
         case .extension:
             base = "extension \(block.typeName)\(inheritance) [\(filePath):\(rangeText)]"
         }
-        return block.hasErrorNode ? "\(base) (!)" : base
+        let parseMarker = block.hasErrorNode ? " (!)" : ""
+        let implementationMarker = blockImplementationMarker(block: block, findings: findings)
+        return base + parseMarker + implementationMarker
     }
 
     private func render(path: String, parsedFile: ParsedFile) -> SkeletonTextResult {
@@ -55,7 +65,8 @@ public struct SkeletonFormatter: Sendable {
             if block.hasErrorNode {
                 hasErrors = true
             }
-            lines.append(header(for: block, filePath: path))
+            let blockFindings = findings(for: block, in: parsedFile.implementationAnalysis.findings)
+            lines.append(header(for: block, filePath: path, findings: blockFindings))
 
             if !block.properties.isEmpty {
                 let props = block.properties
@@ -69,12 +80,17 @@ public struct SkeletonFormatter: Sendable {
                 for method in block.methods {
                     let params = method.parameterTypeRefs.joined(separator: ", ")
                     let methodRange = "\(lineNumber(method.range.startLine))-\(lineNumber(method.range.endLine))"
+                    let marker = primaryMethodFinding(
+                        method: method,
+                        block: block,
+                        findings: blockFindings
+                    ).map { " \($0.marker)" } ?? ""
                     if method.isInitializer {
-                        lines.append("    init(\(params)) [\(methodRange)]")
+                        lines.append("    init(\(params)) [\(methodRange)]\(marker)")
                     } else if let returnTypeRef = method.returnTypeRef {
-                        lines.append("    \(method.name)(\(params)) -> \(returnTypeRef) [\(methodRange)]")
+                        lines.append("    \(method.name)(\(params)) -> \(returnTypeRef) [\(methodRange)]\(marker)")
                     } else {
-                        lines.append("    \(method.name)(\(params)) [\(methodRange)]")
+                        lines.append("    \(method.name)(\(params)) [\(methodRange)]\(marker)")
                     }
                 }
             }
@@ -91,5 +107,68 @@ public struct SkeletonFormatter: Sendable {
             return "?"
         }
         return String(value)
+    }
+
+    private func findings(
+        for block: SkeletonBlock,
+        in findings: [ImplementationFinding]
+    ) -> [ImplementationFinding] {
+        findings.filter { finding in
+            guard finding.typeName == block.typeName else {
+                return false
+            }
+            guard let blockStart = block.range.startLine,
+                  let findingStart = finding.range.startLine else {
+                return true
+            }
+            let blockEnd = block.range.endLine ?? Int.max
+            let findingEnd = finding.range.endLine ?? findingStart
+            return findingStart >= blockStart && findingEnd <= blockEnd
+        }
+    }
+
+    private func blockImplementationMarker(
+        block: SkeletonBlock,
+        findings: [ImplementationFinding]
+    ) -> String {
+        let blockFindings = self.findings(for: block, in: findings)
+        let domains = ImplementationFinding.Domain.allCases.filter { domain in
+            blockFindings.contains { $0.domain == domain }
+        }
+        guard !domains.isEmpty else {
+            return ""
+        }
+        return " [impl:\(domains.map(\.rawValue).joined(separator: ","))]"
+    }
+
+    private func primaryMethodFinding(
+        method: MethodSignature,
+        block: SkeletonBlock,
+        findings: [ImplementationFinding]
+    ) -> ImplementationFinding? {
+        findings
+            .filter {
+                $0.scope == .method &&
+                    $0.typeName == block.typeName &&
+                    $0.methodName == method.name &&
+                    $0.range == method.range
+            }
+            .sorted { findingPriority($0) < findingPriority($1) }
+            .first
+    }
+
+    private func findingPriority(_ finding: ImplementationFinding) -> Int {
+        let certaintyOffset = finding.certainty == .definite ? 0 : 100
+        let reasonPriority: [ImplementationFinding.Reason: Int] = [
+            .trap: 0,
+            .empty: 1,
+            .wire: 2,
+            .error: 3,
+            .constant: 4,
+            .noOperation: 5,
+            .flow: 6,
+            .dead: 7,
+        ]
+        return certaintyOffset + (reasonPriority[finding.reason] ?? 99)
     }
 }

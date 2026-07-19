@@ -1,6 +1,6 @@
 ---
 name: skeleton
-description: Extract and navigate a compact structural map of a codebase with the skltn CLI, including declaration headers, typed properties, method signatures, inheritance, source paths, and line ranges. Use when exploring project architecture, locating symbols, reviewing an unfamiliar repository, or planning changes across files or modules.
+description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, triaging likely stubs or fake wiring, or planning changes across files or modules.
 ---
 
 # Skeleton
@@ -34,6 +34,10 @@ skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 ### 4. Present results
 
 - Use unindented declaration headers as the structural overview.
+- Prioritize declarations with `[impl:<domains>]`, then open the marked method ranges in the original source.
+- Treat `[impl!:<reason>]` as a configured high-confidence pattern match and `[impl?:<reason>]` as a heuristic review signal.
+- Use the original source as the authority before concluding that an implementation is fake, incomplete, wired incorrectly, or unreachable.
+- When correctness is the goal, inspect critical unmarked paths too; no marker means only that the configured patterns found no signal.
 - Treat unindented `# parse_error` lines as diagnostics, not declarations.
 - Preserve file paths and ranges so the user can open the original source.
 - If full output is too large, rerun with `--headers-only` and report that the compact view omits properties and methods.
@@ -60,6 +64,16 @@ Kind filters accept `class`, `struct`, `enum`, `protocol`, `actor`, and `extensi
 Indented lines contain typed properties and method signatures. Return types are printed whenever the parser extracts one, including `Void` or `void`.
 
 `# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
+
+Implementation markers are short signals derived from parser-provided method ranges, lexical body evidence, and project-context heuristics. Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Requirement-only declarations are not treated as empty implementations. `--headers-only` keeps declaration-level `[impl:<domains>]` summaries.
+
+## Reliability boundary
+
+- Markers prioritize source review; they do not perform name resolution, type inference, control-flow proof, data-flow proof, or semantic reachability analysis.
+- Confirm that a reported trap is an invocation, that literal-looking returns do not depend on interpolation, and that error handling is evaluated in the relevant scope.
+- Treat `wire` and `dead` as identifier-reference heuristics. Confirm dependency construction and call paths in the source before reporting them as defects.
+- Findings classified as non-production remain internal and are not rendered. When path classification could affect an audit, inspect the indexed file list and relevant source directly.
+- If a marker conflicts with the source, report the source conclusion and identify the marker as a false positive or false negative.
 
 Read `references/output-format.md` for the output contract and `references/cli.md` for the complete command and option reference.
 

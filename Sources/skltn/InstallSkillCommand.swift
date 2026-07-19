@@ -21,13 +21,13 @@ extension SkeletonIndexCLIMain {
             try fm.createDirectory(atPath: refsDir, withIntermediateDirectories: true)
 
             let skillPath = "\(target.dir)/SKILL.md"
-            try skillContent.write(toFile: skillPath, atomically: true, encoding: .utf8)
+            try (skillContent + "\n").write(toFile: skillPath, atomically: true, encoding: .utf8)
 
             let outputFormatPath = "\(refsDir)/output-format.md"
-            try outputFormatContent.write(toFile: outputFormatPath, atomically: true, encoding: .utf8)
+            try (outputFormatContent + "\n").write(toFile: outputFormatPath, atomically: true, encoding: .utf8)
 
             let cliPath = "\(refsDir)/cli.md"
-            try cliContent.write(toFile: cliPath, atomically: true, encoding: .utf8)
+            try (cliContent + "\n").write(toFile: cliPath, atomically: true, encoding: .utf8)
 
             installed.append("\(target.name): \(target.dir)")
         }
@@ -47,7 +47,7 @@ extension SkeletonIndexCLIMain {
 private let skillContent = """
 ---
 name: skeleton
-description: Extract and navigate a compact structural map of a codebase with the skltn CLI, including declaration headers, typed properties, method signatures, inheritance, source paths, and line ranges. Use when exploring project architecture, locating symbols, reviewing an unfamiliar repository, or planning changes across files or modules.
+description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, triaging likely stubs or fake wiring, or planning changes across files or modules.
 ---
 
 # Skeleton
@@ -81,6 +81,10 @@ skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 ### 4. Present results
 
 - Use unindented declaration headers as the structural overview.
+- Prioritize declarations with `[impl:<domains>]`, then open the marked method ranges in the original source.
+- Treat `[impl!:<reason>]` as a configured high-confidence pattern match and `[impl?:<reason>]` as a heuristic review signal.
+- Use the original source as the authority before concluding that an implementation is fake, incomplete, wired incorrectly, or unreachable.
+- When correctness is the goal, inspect critical unmarked paths too; no marker means only that the configured patterns found no signal.
 - Treat unindented `# parse_error` lines as diagnostics, not declarations.
 - Preserve file paths and ranges so the user can open the original source.
 - If full output is too large, rerun with `--headers-only` and report that the compact view omits properties and methods.
@@ -107,6 +111,16 @@ Kind filters accept `class`, `struct`, `enum`, `protocol`, `actor`, and `extensi
 Indented lines contain typed properties and method signatures. Return types are printed whenever the parser extracts one, including `Void` or `void`.
 
 `# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
+
+Implementation markers are short signals derived from parser-provided method ranges, lexical body evidence, and project-context heuristics. Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Requirement-only declarations are not treated as empty implementations. `--headers-only` keeps declaration-level `[impl:<domains>]` summaries.
+
+## Reliability boundary
+
+- Markers prioritize source review; they do not perform name resolution, type inference, control-flow proof, data-flow proof, or semantic reachability analysis.
+- Confirm that a reported trap is an invocation, that literal-looking returns do not depend on interpolation, and that error handling is evaluated in the relevant scope.
+- Treat `wire` and `dead` as identifier-reference heuristics. Confirm dependency construction and call paths in the source before reporting them as defects.
+- Findings classified as non-production remain internal and are not rendered. When path classification could affect an audit, inspect the indexed file list and relevant source directly.
+- If a marker conflicts with the source, report the source conclusion and identify the marker as a false positive or false negative.
 
 Read `references/output-format.md` for the output contract and `references/cli.md` for the complete command and option reference.
 
@@ -135,10 +149,10 @@ private let outputFormatContent = """
 ## Structure
 
 ```text
-<kind> <Name>[: Inheritance] [<file>:<start>-<end>] [(!)]
+<kind> <Name>[: Inheritance] [<file>:<start>-<end>] [(!)] [impl:<domains>]
   props: <name>:<Type>, ...
   methods:
-    <name>(<ParamTypes>) [-> <ReturnType>] [<start>-<end>]
+    <name>(<ParamTypes>) [-> <ReturnType>] [<start>-<end>] [impl!|?:<reason>]
 ```
 
 ## Declaration headers
@@ -180,6 +194,30 @@ Method ranges are relative to the containing file.
 | `# parse_error <file>` | The file contains a parse error or could not be parsed normally; partial declarations may still be present. |
 | `(!)` | The declaration block contains a parser error node and may be incomplete. |
 | `?` | A parameter type or line position is unknown. |
+| `[impl:<domains>]` | The declaration contains one or more implementation findings in `body`, `flow`, `error`, `wire`, or `dead`. |
+| `[impl!:<reason>]` | A configured high-confidence implementation pattern matched at this method range. |
+| `[impl?:<reason>]` | A lexical or project-context heuristic should be reviewed at this method range. |
+
+Only the highest-priority reason is printed per method. The internal fingerprint retains body state, parameter reads, return origins, state reads and writes, calls, control-flow paths, terminal behavior, caught errors, async operations, effects, production reachability, and implementation binding without retaining method body text.
+
+| Reason | Signal |
+|---|---|
+| `trap` | Explicit trap or not-implemented terminal. |
+| `empty` | Concrete non-initializer body has no executable content. |
+| `const` | Inputs are ignored and only a literal result is returned. |
+| `noop` | Inputs are ignored and no result or observable work is detected. |
+| `flow` | Multiple branches collapse to the same literal result. |
+| `error` | A caught error has no detected propagation, result, or logging. |
+| `wire` | A fake-like implementation type is referenced by production source. |
+| `dead` | An explicitly private method has no production reference. |
+
+These markers are review signals, not semantic verification. No marker means no configured pattern was detected. Requirement-only declarations remain body-absent and unflagged. Findings classified as non-production remain internal and are not rendered.
+
+## Detection boundary
+
+The current analyzer uses parser-provided method ranges, lexical body evidence, and project-wide identifier references. It does not retain method body text and does not prove name resolution, types, control flow, data flow, dependency wiring, or reachability.
+
+Use the original source as the authority. Confirm invocation shape for trap findings, dependencies inside interpolated or quoted expressions for constant findings, the relevant handler scope for error findings, and construction or call paths for wire and dead findings. Path-based non-production classification can suppress rendered findings, so inspect indexed paths directly when classification affects the audit.
 
 ## Ordering
 
@@ -235,7 +273,7 @@ An unrecognized first positional token is treated as the project root for the de
 | `--path <path>` | `--file` | Return one indexed file using its project-relative or absolute path. |
 | `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
 | `--kind <kind>` | `--kinds` | Keep selected declaration kinds after parsing. |
-| `--headers-only` | — | Keep declaration headers and parse markers; omit properties and methods. |
+| `--headers-only` | — | Keep declaration headers, parse markers, and `[impl:<domains>]` summaries; omit properties and methods. |
 
 Language and kind options may be repeated or supplied as comma-separated values. Value options also accept the `--option=value` form.
 
@@ -269,5 +307,5 @@ Query searches declaration headers, inheritance, typed properties, method names,
 
 ## Output size
 
-Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` markers.
+Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` and declaration-level implementation markers.
 """

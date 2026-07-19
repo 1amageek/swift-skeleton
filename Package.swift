@@ -233,6 +233,21 @@ let package = Package(
             dependencies: ["SkeletonIndexCore", "SkeletonSwiftParser"]
         ),
         .testTarget(
+            name: "ImplementationFingerprintLanguageTests",
+            dependencies: [
+                "SkeletonIndexCore",
+                "SkeletonSwiftParser",
+                "SkeletonKotlinParser",
+                "SkeletonTypeScriptParser",
+                "SkeletonGoParser",
+                "SkeletonZigParser",
+                "SkeletonRustParser",
+                "SkeletonCppParser",
+                "SkeletonPythonParser",
+                "SkeletonJavaParser",
+            ]
+        ),
+        .testTarget(
             name: "SkeletonKotlinParserTests",
             dependencies: ["SkeletonKotlinParser"],
             resources: [.copy("Fixtures")]

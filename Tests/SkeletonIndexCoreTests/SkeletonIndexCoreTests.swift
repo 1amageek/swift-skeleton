@@ -36,6 +36,14 @@ func indexesAllCoreFiles() throws {
         "SkeletonIndexCore.swift",
         "SkeletonProjectRegistry.swift",
         "SkeletonParser.swift",
+        "ImplementationFingerprint.swift",
+        "ImplementationFinding.swift",
+        "MethodImplementationAnalysis.swift",
+        "FileImplementationAnalysis.swift",
+        "ImplementationAnalyzing.swift",
+        "ImplementationContextResolving.swift",
+        "DefaultImplementationAnalyzer.swift",
+        "DefaultImplementationContextResolver.swift",
     ]
 
     let indexedFiles = Set(index.files.keys)
@@ -148,6 +156,26 @@ func allMethodRangesValid() throws {
         #expect(!line.hasSuffix("-?]"), "Method has unknown end line: \(line)")
         #expect(!line.contains("[?-"), "Method has unknown start line: \(line)")
     }
+}
+
+@Test("method ranges ignore closure defaults inside multiline signatures")
+func methodRangeWithClosureDefault() {
+    let source = """
+    struct Transformer {
+        func run(
+            value: Int,
+            transform: (Int) -> Int = { $0 }
+        ) -> Int
+        {
+            transform(value)
+        }
+    }
+    """
+    let parsed = swiftParser().parse(path: "Transformer.swift", source: source)
+    let method = parsed.blocks.first?.methods.first { $0.name == "run" }
+
+    #expect(method?.range.startLine == 2)
+    #expect(method?.range.endLine == 8)
 }
 
 @Test("query finds SkeletonProjectRegistry by name")
@@ -418,7 +446,7 @@ func statusFileCount() throws {
     let index = try core.build(projectRoot: projectSourcesRoot())
     let status = core.status(index: index)
 
-    #expect(status.filesIndexed == 17)
+    #expect(status.filesIndexed == 25)
     #expect(status.parseErrorFiles == 0)
     #expect(status.isWatching == false)
     #expect(!status.lastUpdateTS.isEmpty)
@@ -692,7 +720,232 @@ func unsupportedLanguageError() async throws {
     }
 }
 
+// MARK: - Implementation fingerprint
+
+@Test("implementation markers distinguish definite and suspicious bodies")
+func implementationMarkers() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "ImplementationCases.swift": """
+            struct ImplementationCases {
+                init() {}
+
+                func trapped(value: Int) -> Int {
+                    fatalError("not implemented")
+                }
+
+                func empty(value: Int) {}
+
+                func constant(value: Int) -> Bool {
+                    return false
+                }
+
+                func live(value: Int) -> Int {
+                    value + 1
+                }
+            }
+
+            protocol Requirement {
+                func required(value: Int) -> Int
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let index = try core.build(projectRoot: projectRoot)
+    let text = core.getSkeleton(index: index).text
+
+    #expect(text.contains("ImplementationCases.swift:") && text.contains("[impl:body]"))
+    #expect(text.contains("trapped(Int) -> Int") && text.contains("[impl!:trap]"))
+    #expect(text.contains("empty(Int)") && text.contains("[impl!:empty]"))
+    #expect(text.contains("constant(Int) -> Bool") && text.contains("[impl?:const]"))
+    #expect(!methodLine(named: "live", in: text).contains("[impl"))
+    #expect(!methodLine(named: "init", in: text).contains("[impl"))
+    #expect(!methodLine(named: "required", in: text).contains("[impl"))
+}
+
+@Test("fingerprint captures implementation evidence without body text")
+func fingerprintEvidence() throws {
+    let source = """
+    struct Worker {
+        var total: Int
+
+        mutating func run(value: Int) async -> Int {
+            total = await calculate(value)
+            return total
+        }
+    }
+    """
+    let parser = swiftParser()
+    let parsed = parser.parse(path: "Worker.swift", source: source)
+    let analysis = DefaultImplementationAnalyzer().analyze(
+        path: "Worker.swift",
+        blocks: parsed.blocks,
+        source: source,
+        language: parser.languageName
+    )
+    let fingerprint = analysis.methods.first { $0.methodName == "run" }?.fingerprint
+
+    #expect(fingerprint?.bodyState == .concrete)
+    #expect(fingerprint?.parameterReads == ["value"])
+    #expect(fingerprint?.stateReads == ["total"])
+    #expect(fingerprint?.stateWrites == ["total"])
+    #expect(fingerprint?.callTargets.contains("calculate") == true)
+    #expect(fingerprint?.asyncOperations == ["await"])
+    #expect(fingerprint?.returnOrigins == [.state])
+}
+
+@Test("project context reports dead and production-wired fake implementations")
+func projectContextMarkers() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Production.swift": """
+            protocol Store {}
+            struct FakeStore: Store {}
+
+            struct Application {
+                let store: Store = FakeStore()
+
+                private func hidden() -> Int {
+                    calculate()
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let index = try core.build(projectRoot: projectRoot)
+    let text = core.getSkeleton(index: index).text
+
+    #expect(headerLine(named: "FakeStore", in: text).contains("[impl:wire]"))
+    #expect(methodLine(named: "hidden", in: text).contains("[impl?:dead]"))
+
+    let method = index.files["Production.swift"]?.implementationAnalysis.methods.first { $0.methodName == "hidden" }
+    #expect(method?.fingerprint.productionReachability == .unreferenced)
+}
+
+@Test("non-production findings stay internal and are not rendered")
+func nonProductionFindingsAreSuppressed() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "WorkerTests.swift": """
+            struct WorkerTests {
+                func helper(value: Int) -> Int {
+                    fatalError("test trap")
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let index = try core.build(projectRoot: projectRoot)
+    let text = core.getSkeleton(index: index).text
+    let method = index.files["WorkerTests.swift"]?.implementationAnalysis.methods.first
+
+    #expect(!text.contains("[impl"))
+    #expect(method?.fingerprint.terminalBehaviors.contains(.traps) == true)
+    #expect(method?.fingerprint.productionReachability == .nonProduction)
+    #expect(method?.fingerprint.implementationBinding == .testOnly)
+}
+
+@Test("swallowed errors and collapsed branches use compact reasons")
+func errorAndFlowMarkers() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "ControlFlow.swift": """
+            struct ControlFlow {
+                func swallowed() {
+                    do {
+                        work()
+                    } catch {
+                    }
+                }
+
+                func collapsed(value: Bool) -> Int {
+                    if value {
+                        return 1
+                    } else {
+                        return 1
+                    }
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let index = try core.build(projectRoot: projectRoot)
+    let text = core.getSkeleton(index: index).text
+
+    #expect(methodLine(named: "swallowed", in: text).contains("[impl?:error]"))
+    #expect(methodLine(named: "collapsed", in: text).contains("[impl?:flow]"))
+    #expect(headerLine(named: "ControlFlow", in: text).contains("[impl:flow,error]"))
+}
+
+@Test("incremental update replaces fingerprints and findings")
+func updateReplacesImplementationAnalysis() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Evolving.swift": """
+            struct Evolving {
+                func resolve(value: Int) -> Int {
+                    fatalError("pending")
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    var index = try core.build(projectRoot: projectRoot)
+    #expect(methodLine(named: "resolve", in: core.getSkeleton(index: index).text).contains("[impl!:trap]"))
+
+    let completedSource = """
+    struct Evolving {
+        func resolve(value: Int) -> Int {
+            value + 1
+        }
+    }
+    """
+    let fileURL = URL(fileURLWithPath: projectRoot).appendingPathComponent("Evolving.swift")
+    try completedSource.write(to: fileURL, atomically: true, encoding: .utf8)
+    let _ = try core.update(index: &index, changedPaths: ["Evolving.swift"], removedPaths: [])
+
+    let updatedLine = methodLine(named: "resolve", in: core.getSkeleton(index: index).text)
+    let fingerprint = index.files["Evolving.swift"]?.implementationAnalysis.methods.first?.fingerprint
+    #expect(!updatedLine.contains("[impl"))
+    #expect(fingerprint?.parameterReads == ["value"])
+    #expect(fingerprint?.returnOrigins == [.parameter])
+}
+
 // MARK: - Helpers
+
+private func methodLine(named name: String, in text: String) -> String {
+    text.split(separator: "\n").map(String.init).first {
+        $0.trimmingCharacters(in: .whitespaces).hasPrefix("\(name)(")
+    } ?? ""
+}
+
+private func headerLine(named name: String, in text: String) -> String {
+    text.split(separator: "\n").map(String.init).first {
+        !$0.hasPrefix(" ") && $0.contains(" \(name)")
+    } ?? ""
+}
+
+private func removeTemporaryProject(_ path: String) {
+    do {
+        try FileManager.default.removeItem(at: URL(fileURLWithPath: path))
+    } catch {
+    }
+}
 
 private func makeTemporaryProject(files: [String: String]) throws -> String {
     let rootURL = FileManager.default.temporaryDirectory

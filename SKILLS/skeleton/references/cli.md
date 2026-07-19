@@ -38,7 +38,7 @@ An unrecognized first positional token is treated as the project root for the de
 | `--path <path>` | `--file` | Return one indexed file using its project-relative or absolute path. |
 | `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
 | `--kind <kind>` | `--kinds` | Keep selected declaration kinds after parsing. |
-| `--headers-only` | — | Keep declaration headers and parse markers; omit properties and methods. |
+| `--headers-only` | — | Keep declaration headers, parse markers, and `[impl:<domains>]` summaries; omit properties and methods. |
 
 Language and kind options may be repeated or supplied as comma-separated values. Value options also accept the `--option=value` form.
 
@@ -72,4 +72,4 @@ Query searches declaration headers, inheritance, typed properties, method names,
 
 ## Output size
 
-Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` markers.
+Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` and declaration-level implementation markers.

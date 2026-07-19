@@ -19,6 +19,12 @@ func cliSkeletonQueryAndFiltersEndToEnd() async throws {
                 User(id: id, name: id)
             }
         }
+
+        struct Placeholder {
+            func load(id: String) -> User {
+                fatalError("pending")
+            }
+        }
         """,
         "Sources/App/Other.py": """
         class PythonOnly:
@@ -53,6 +59,19 @@ func cliSkeletonQueryAndFiltersEndToEnd() async throws {
     #expect(actorHeaders.stdout.contains("actor UserStore [Sources/App/Model.swift:10-14]"))
     #expect(!actorHeaders.stdout.contains("struct User"))
     #expect(!actorHeaders.stdout.contains("methods:"))
+
+    let structHeaders = try await runSkltn([
+        "skeleton",
+        projectRoot,
+        "--language",
+        "swift",
+        "--kind",
+        "struct",
+        "--headers-only",
+    ])
+    #expect(structHeaders.exitCode == 0)
+    #expect(structHeaders.stdout.contains("struct Placeholder [Sources/App/Model.swift:16-20] [impl:body]"))
+    #expect(!structHeaders.stdout.contains("[impl!:trap]"))
 
     let query = try await runSkltn([
         "query",

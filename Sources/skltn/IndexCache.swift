@@ -30,7 +30,12 @@ actor IndexCache {
                 case .extension: return kinds.contains("extension")
                 }
             }
-            return ParsedFile(path: parsedFile.path, blocks: blocks, hasParseError: parsedFile.hasParseError)
+            return ParsedFile(
+                path: parsedFile.path,
+                blocks: blocks,
+                hasParseError: parsedFile.hasParseError,
+                implementationAnalysis: parsedFile.implementationAnalysis
+            )
         }.filter { !$0.value.blocks.isEmpty }
         return ProjectIndex(
             projectRoot: index.projectRoot,

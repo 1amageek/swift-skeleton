@@ -10,6 +10,8 @@ That shape is the **skeleton** — declarations without implementations. Like lo
 
 swift-skeleton extracts this skeleton automatically: type declarations, properties, method signatures, inheritance, file paths, and line numbers. The result fits in a context window where full source code never would. The LLM reads the skeleton, understands the architecture, and then dives into only the files it actually needs.
 
+Parser-range-derived implementation fingerprints and project-context heuristics also add short review signals without retaining method bodies:
+
 ```
 struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.swift:3-246]
   props: parsers:[any SkeletonParser], formatter:SkeletonFormatter
@@ -18,6 +20,11 @@ struct SkeletonIndexCore: Sendable [Sources/SkeletonIndexCore/SkeletonIndexCore.
     build(String) -> ProjectIndex [16-45]
     getSkeleton(ProjectIndex, String?) -> SkeletonTextResult [57-62]
     query(ProjectIndex, String, Int) -> [QueryHit] [97-139]
+
+struct PlaceholderStore: Store [Sources/PlaceholderStore.swift:1-12] [impl:body,wire]
+  methods:
+    load(String) -> Item [4-6] [impl!:trap]
+    contains(String) -> Bool [8-10] [impl?:const]
 ```
 
 From this alone, an LLM can instantly understand:
@@ -26,8 +33,31 @@ From this alone, an LLM can instantly understand:
 - It takes parsers via DI and builds an index with `build`
 - Results are retrieved via `getSkeleton` and `query`
 - The implementation lives in `SkeletonIndexCore.swift` lines 3–246
+- `PlaceholderStore` has high-confidence and suspicious implementation patterns worth reopening
 
 Built on [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) for fast, accurate parsing.
+
+### Implementation markers
+
+| Marker | Meaning |
+|---|---|
+| `[impl:body,wire]` | Declaration-level summary, preserved by `--headers-only` |
+| `[impl!:trap]` | Configured high-confidence pattern such as an explicit not-implemented terminal |
+| `[impl?:const]` | Lexical or project-context heuristic requiring source review |
+
+Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Protocol/interface requirements are not treated as empty implementations, and normal output suppresses findings classified as non-production.
+
+### Trust boundary
+
+Implementation markers prioritize source review; they are not semantic verification. The analyzer uses parser-provided method ranges, lexical body evidence, and project-wide identifier references. It does not prove name resolution, types, control flow, data flow, dependency wiring, or reachability.
+
+- Open every marked method range and use the original source as the authority.
+- Confirm invocation shape for `trap`, interpolation dependencies for `const`, handler scope for `error`, and construction or call paths for `wire` and `dead`.
+- Treat intentional default implementations and domain-correct no-ops as valid after source review.
+- Treat no marker as “no configured pattern matched,” not as proof that the implementation is complete.
+- Check `diagnostics` before trusting coverage because partial results can accompany parser errors.
+
+Project-context analysis inspects the indexed source set. For large monorepos, start from a package or module root and widen the scan only when cross-package context is required.
 
 ## Supported Languages
 

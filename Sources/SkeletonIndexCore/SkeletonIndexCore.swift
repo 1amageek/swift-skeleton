@@ -3,10 +3,19 @@ import Foundation
 public struct SkeletonIndexCore: Sendable {
     private let parsers: [any SkeletonParser]
     private let formatter: SkeletonFormatter
+    private let implementationAnalyzer: any ImplementationAnalyzing
+    private let implementationContextResolver: any ImplementationContextResolving
 
-    public init(parsers: [any SkeletonParser], formatter: SkeletonFormatter = .init()) {
+    public init(
+        parsers: [any SkeletonParser],
+        formatter: SkeletonFormatter = .init(),
+        implementationAnalyzer: any ImplementationAnalyzing = DefaultImplementationAnalyzer(),
+        implementationContextResolver: any ImplementationContextResolving = DefaultImplementationContextResolver()
+    ) {
         self.parsers = parsers
         self.formatter = formatter
+        self.implementationAnalyzer = implementationAnalyzer
+        self.implementationContextResolver = implementationContextResolver
     }
 
     public var supportedLanguages: Set<String> {
@@ -27,6 +36,7 @@ public struct SkeletonIndexCore: Sendable {
 
         let activeParsers = try parsers(for: languages)
         var files: [String: ParsedFile] = [:]
+        var sources: [String: String] = [:]
         for relativePath in sourceFilePaths(rootURL: rootURL, parsers: activeParsers).sorted() {
             let absoluteURL = rootURL.appendingPathComponent(relativePath)
             let source: String
@@ -38,8 +48,18 @@ public struct SkeletonIndexCore: Sendable {
             guard let parser = parser(for: relativePath, in: activeParsers) else {
                 continue
             }
-            files[relativePath] = parser.parse(path: relativePath, source: source)
+            let parsedFile = parser.parse(path: relativePath, source: source)
+            let analysis = implementationAnalyzer.analyze(
+                path: relativePath,
+                blocks: parsedFile.blocks,
+                source: source,
+                language: parser.languageName
+            )
+            files[relativePath] = parsedFile.replacing(implementationAnalysis: analysis)
+            sources[relativePath] = source
         }
+
+        files = implementationContextResolver.resolve(files: files, sources: sources)
 
         return ProjectIndex(
             projectRoot: rootURL.path,
@@ -92,8 +112,26 @@ public struct SkeletonIndexCore: Sendable {
             guard let parser = parser(for: normalizedPath, in: parsers) else {
                 continue
             }
-            index.files[normalizedPath] = parser.parse(path: normalizedPath, source: source)
+            let parsedFile = parser.parse(path: normalizedPath, source: source)
+            let analysis = implementationAnalyzer.analyze(
+                path: normalizedPath,
+                blocks: parsedFile.blocks,
+                source: source,
+                language: parser.languageName
+            )
+            index.files[normalizedPath] = parsedFile.replacing(implementationAnalysis: analysis)
         }
+
+        var sources: [String: String] = [:]
+        for path in index.files.keys.sorted() {
+            let absolutePath = URL(fileURLWithPath: index.projectRoot).appendingPathComponent(path).path
+            do {
+                sources[path] = try String(contentsOfFile: absolutePath, encoding: .utf8)
+            } catch {
+                throw SkeletonError.fileReadFailed(path)
+            }
+        }
+        index.files = implementationContextResolver.resolve(files: index.files, sources: sources)
 
         index.lastUpdateTS = timestamp()
         return status(index: index)
@@ -112,7 +150,11 @@ public struct SkeletonIndexCore: Sendable {
                 continue
             }
             for block in parsedFile.blocks {
-                let header = formatter.header(for: block, filePath: filePath)
+                let header = formatter.header(
+                    for: block,
+                    filePath: filePath,
+                    findings: parsedFile.implementationAnalysis.findings
+                )
                 let blockText = renderSearchText(block: block, header: header).lowercased()
                 let score = occurrences(of: needle, in: blockText)
                 if score > 0 {

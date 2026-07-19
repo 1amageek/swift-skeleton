@@ -109,7 +109,7 @@ public struct DeclarationExtractor: Sendable {
         let params = TextUtilities.parseParameterTypeRefs(TextUtilities.betweenParentheses(fullSignature) ?? "")
         let returnType = methodStart.isInitializer ? nil : parseReturnType(fullSignature)
         let startLine = declarationStartLine + lineIndex
-        let endLine = TextUtilities.blockEndLine(lines: lines, startIndex: lineIndex).map { declarationStartLine + $0 }
+        let endLine = methodEndLine(lines: lines, startIndex: lineIndex).map { declarationStartLine + $0 }
 
         return MethodSignature(
             name: methodStart.name,
@@ -118,6 +118,81 @@ public struct DeclarationExtractor: Sendable {
             range: SourceRange(startLine: startLine, endLine: endLine),
             isInitializer: methodStart.isInitializer
         )
+    }
+
+    private func methodEndLine(lines: [String], startIndex: Int) -> Int? {
+        var parenthesisDepth = 0
+        var signatureComplete = false
+        var foundBody = false
+        var braceDepth = 0
+
+        for index in startIndex..<lines.count {
+            let line = lines[index]
+            if foundBody {
+                braceDepth += TextUtilities.braceBalance(line)
+            } else {
+                var characterIndex = line.startIndex
+                while characterIndex < line.endIndex {
+                    let character = line[characterIndex]
+                    if character == "(" {
+                        parenthesisDepth += 1
+                    } else if character == ")" {
+                        parenthesisDepth = max(0, parenthesisDepth - 1)
+                        if parenthesisDepth == 0 {
+                            signatureComplete = true
+                        }
+                    } else if character == "{" && signatureComplete && parenthesisDepth == 0 {
+                        foundBody = true
+                        braceDepth += TextUtilities.braceBalance(String(line[characterIndex...]))
+                        break
+                    }
+                    characterIndex = line.index(after: characterIndex)
+                }
+            }
+
+            if foundBody {
+                if braceDepth == 0 {
+                    return index
+                }
+                continue
+            }
+
+            guard signatureComplete else {
+                continue
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let signatureTail: String
+            if let closingParenthesis = line.lastIndex(of: ")") {
+                signatureTail = String(line[line.index(after: closingParenthesis)...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                signatureTail = trimmed
+            }
+            if signatureTail.hasSuffix(";") || assignmentEquals(in: signatureTail) {
+                return index
+            }
+            if index + 1 >= lines.count {
+                return index
+            }
+            let next = lines[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if next.hasPrefix("{") || next.hasPrefix("where ") || next.hasPrefix("throws") || next.hasPrefix("->") {
+                continue
+            }
+            return index
+        }
+        return nil
+    }
+
+    private func assignmentEquals(in text: String) -> Bool {
+        let characters = Array(text)
+        for index in characters.indices where characters[index] == "=" {
+            let previous = index > characters.startIndex ? characters[index - 1] : " "
+            let next = index + 1 < characters.endIndex ? characters[index + 1] : " "
+            if previous != "=" && previous != "!" && previous != "<" && previous != ">" && next != "=" && next != ">" {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Return Type
