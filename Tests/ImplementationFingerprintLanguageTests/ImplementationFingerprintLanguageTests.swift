@@ -120,7 +120,8 @@ func allLanguagesProduceTrapFingerprints() {
             path: languageCase.path,
             blocks: parsed.blocks,
             source: languageCase.source,
-            language: languageCase.parser.languageName
+            language: languageCase.parser.languageName,
+            syntaxEvidence: parsed.methodSyntaxEvidence
         )
         let method = analysis.methods.first { $0.methodName == languageCase.methodName }
         let finding = analysis.findings.first {
@@ -128,9 +129,13 @@ func allLanguagesProduceTrapFingerprints() {
         }
 
         #expect(method != nil, "Missing method for \(languageCase.parser.languageName)")
-        #expect(method?.fingerprint.bodyState == .concrete)
-        #expect(method?.fingerprint.terminalBehaviors.contains(.traps) == true)
-        #expect(finding?.certainty == .definite)
+        #expect(!parsed.methodSyntaxEvidence.isEmpty, "Missing AST evidence for \(languageCase.parser.languageName)")
+        #expect(method?.fingerprint.bodyState == .concrete, "Wrong body state for \(languageCase.parser.languageName)")
+        #expect(
+            method?.fingerprint.terminalBehaviors.contains(.traps) == true,
+            "Missing trap behavior for \(languageCase.parser.languageName)"
+        )
+        #expect(finding?.certainty == .definite, "Missing trap finding for \(languageCase.parser.languageName)")
     }
 }
 
@@ -230,7 +235,8 @@ func abstractRequirementsRemainUnflagged() {
             path: languageCase.path,
             blocks: parsed.blocks,
             source: languageCase.source,
-            language: languageCase.parser.languageName
+            language: languageCase.parser.languageName,
+            syntaxEvidence: parsed.methodSyntaxEvidence
         )
         let method = analysis.methods.first { $0.methodName == languageCase.methodName }
 
@@ -240,7 +246,13 @@ func abstractRequirementsRemainUnflagged() {
         }
 
         #expect(method != nil, "Missing requirement for \(languageCase.parser.languageName)")
-        #expect(method?.fingerprint.bodyState == .absent)
-        #expect(!analysis.findings.contains { $0.methodName == languageCase.methodName })
+        #expect(
+            method?.fingerprint.bodyState == .absent,
+            "Wrong abstract body state for \(languageCase.parser.languageName)"
+        )
+        #expect(
+            !analysis.findings.contains { $0.methodName == languageCase.methodName },
+            "Abstract method flagged for \(languageCase.parser.languageName)"
+        )
     }
 }

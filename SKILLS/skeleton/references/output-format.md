@@ -50,7 +50,7 @@ Method ranges are relative to the containing file.
 | `?` | A parameter type or line position is unknown. |
 | `[impl:<domains>]` | The declaration contains one or more implementation findings in `body`, `flow`, `error`, `wire`, or `dead`. |
 | `[impl!:<reason>]` | A configured high-confidence implementation pattern matched at this method range. |
-| `[impl?:<reason>]` | A lexical or project-context heuristic should be reviewed at this method range. |
+| `[impl?:<reason>]` | An AST-pattern or project-context heuristic should be reviewed at this method range. |
 
 Only the highest-priority reason is printed per method. The internal fingerprint retains body state, parameter reads, return origins, state reads and writes, calls, control-flow paths, terminal behavior, caught errors, async operations, effects, production reachability, and implementation binding without retaining method body text.
 
@@ -59,17 +59,17 @@ Only the highest-priority reason is printed per method. The internal fingerprint
 | `trap` | Explicit trap or not-implemented terminal. |
 | `empty` | Concrete non-initializer body has no executable content. |
 | `const` | Inputs are ignored and only a literal result is returned. |
-| `noop` | Inputs are ignored and no result or observable work is detected. |
+| `noop` | Executable syntax produces no result or observable work. |
 | `flow` | Multiple branches collapse to the same literal result. |
-| `error` | A caught error has no detected propagation, result, or logging. |
-| `wire` | A fake-like implementation type is referenced by production source. |
+| `error` | A caught error has no detected propagation, result, or observable handling. |
+| `wire` | A fake-like implementation type is used as a production call or construction target. |
 | `dead` | An explicitly private method has no production reference. |
 
 These markers are review signals, not semantic verification. No marker means no configured pattern was detected. Requirement-only declarations remain body-absent and unflagged. Findings classified as non-production remain internal and are not rendered.
 
 ## Detection boundary
 
-The current analyzer uses parser-provided method ranges, lexical body evidence, and project-wide identifier references. It does not retain method body text and does not prove name resolution, types, control flow, data flow, dependency wiring, or reachability.
+Built-in parsers use parser-provided AST evidence and a project-wide identifier/call index. Compatibility parsers that omit AST evidence use range-based fallback analysis. Neither path retains method body text or proves name resolution, types, semantic correctness, dependency wiring, or reachability.
 
 Use the original source as the authority. Confirm invocation shape for trap findings, dependencies inside interpolated or quoted expressions for constant findings, the relevant handler scope for error findings, and construction or call paths for wire and dead findings. Path-based non-production classification can suppress rendered findings, so inspect indexed paths directly when classification affects the audit.
 

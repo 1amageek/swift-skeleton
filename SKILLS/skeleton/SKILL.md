@@ -16,12 +16,12 @@ Use the path supplied by the user. If no path is supplied, use the current worki
 ### 2. Build a structural map
 
 ```bash
-skltn skeleton [project-root] [options]
+skltn get [project-root] [options]
 ```
 
 For a large repository, start with `--headers-only`. Use `--path <relative-file>` for one indexed file, `--language <name>` to restrict parsers, and `--kind <kind>` to restrict supported declaration kinds.
 
-The `skeleton` command may be omitted. `get_skeleton` and `build` are aliases.
+The `get` command may be omitted. `skeleton`, `get_skeleton`, and `build` are compatibility aliases.
 
 ### 3. Search indexed declarations
 
@@ -65,13 +65,13 @@ Indented lines contain typed properties and method signatures. Return types are 
 
 `# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
 
-Implementation markers are short signals derived from parser-provided method ranges, lexical body evidence, and project-context heuristics. Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Requirement-only declarations are not treated as empty implementations. `--headers-only` keeps declaration-level `[impl:<domains>]` summaries.
+Implementation markers are short signals derived from parser-provided AST evidence and project-context heuristics. Built-in parsers summarize calls, returns, writes, branches, catches, and traps while the syntax tree is alive; function body text is not retained. Compatibility parsers that omit AST evidence use range-based fallback analysis. Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Requirement-only declarations are not treated as empty implementations. `--headers-only` keeps declaration-level `[impl:<domains>]` summaries.
 
 ## Reliability boundary
 
 - Markers prioritize source review; they do not perform name resolution, type inference, control-flow proof, data-flow proof, or semantic reachability analysis.
-- Confirm that a reported trap is an invocation, that literal-looking returns do not depend on interpolation, and that error handling is evaluated in the relevant scope.
-- Treat `wire` and `dead` as identifier-reference heuristics. Confirm dependency construction and call paths in the source before reporting them as defects.
+- AST markers are intentionally narrow. They detect configured syntax patterns, not whether a plausible algorithm is semantically correct or intentionally deceptive.
+- Treat `wire` and `dead` as project-context heuristics. Confirm dependency construction and call paths in the source before reporting them as defects.
 - Findings classified as non-production remain internal and are not rendered. When path classification could affect an audit, inspect the indexed file list and relevant source directly.
 - If a marker conflicts with the source, report the source conclusion and identify the marker as a false positive or false negative.
 

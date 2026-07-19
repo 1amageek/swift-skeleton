@@ -2,6 +2,7 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterPythonGrammar
 import SkeletonIndexCore
+import SkeletonTreeSitterSupport
 
 public struct PythonSkeletonParser: SkeletonParser, Sendable {
     public var languageName: String { "python" }
@@ -28,7 +29,12 @@ public struct PythonSkeletonParser: SkeletonParser, Sendable {
         var blocks: [SkeletonBlock] = []
         collectBlocks(from: root, source: source, into: &blocks)
 
-        return ParsedFile(path: path, blocks: blocks, hasParseError: root.hasError)
+        let evidence = TreeSitterImplementationEvidenceExtractor().extract(
+            root: root, source: source, blocks: blocks, language: languageName
+        )
+        return ParsedFile(
+            path: path, blocks: blocks, hasParseError: root.hasError, methodSyntaxEvidence: evidence
+        )
     }
 
     private func collectBlocks(from node: Node, source: String, into blocks: inout [SkeletonBlock]) {

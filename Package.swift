@@ -73,6 +73,13 @@ let package = Package(
         .target(
             name: "SkeletonIndexCore"
         ),
+        .target(
+            name: "SkeletonTreeSitterSupport",
+            dependencies: [
+                "SkeletonIndexCore",
+                .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
+            ]
+        ),
 
         // MARK: - Grammar C targets
         .target(
@@ -135,6 +142,7 @@ let package = Package(
             name: "SkeletonSwiftParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterSwiftGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -143,6 +151,7 @@ let package = Package(
             name: "SkeletonKotlinParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterKotlinGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -151,6 +160,7 @@ let package = Package(
             name: "SkeletonTypeScriptParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterTypeScriptGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -159,6 +169,7 @@ let package = Package(
             name: "SkeletonGoParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterGoGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -167,6 +178,7 @@ let package = Package(
             name: "SkeletonZigParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterZigGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -175,6 +187,7 @@ let package = Package(
             name: "SkeletonRustParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterRustGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -183,6 +196,7 @@ let package = Package(
             name: "SkeletonCppParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterCppGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -191,6 +205,7 @@ let package = Package(
             name: "SkeletonPythonParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterPythonGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]
@@ -199,6 +214,7 @@ let package = Package(
             name: "SkeletonJavaParser",
             dependencies: [
                 "SkeletonIndexCore",
+                "SkeletonTreeSitterSupport",
                 "TreeSitterJavaGrammar",
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
             ]

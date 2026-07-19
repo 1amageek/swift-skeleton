@@ -35,7 +35,7 @@ func cliSkeletonQueryAndFiltersEndToEnd() async throws {
     defer { removeTemporaryProject(projectRoot) }
 
     let skeleton = try await runSkltn([
-        "skeleton",
+        "get",
         projectRoot,
         "--language",
         "swift",
@@ -61,7 +61,6 @@ func cliSkeletonQueryAndFiltersEndToEnd() async throws {
     #expect(!actorHeaders.stdout.contains("methods:"))
 
     let structHeaders = try await runSkltn([
-        "skeleton",
         projectRoot,
         "--language",
         "swift",
@@ -165,6 +164,15 @@ func cliLanguagesEndToEnd() async throws {
     #expect(languages.contains("python"))
 }
 
+@Test(.timeLimit(.minutes(1)))
+func cliHelpPublishesCanonicalGetCommand() async throws {
+    let result = try await runSkltn(["help"])
+
+    #expect(result.exitCode == 0)
+    #expect(result.stdout.contains("skltn get [project-root]"))
+    #expect(result.stdout.contains("skeleton, get_skeleton, build -> get"))
+}
+
 private struct CommandResult {
     let exitCode: Int32
     let stdout: String
@@ -234,6 +242,15 @@ private func runSkltn(
 }
 
 private func skltnExecutableURL() throws -> URL {
+    if let configuredPath = ProcessInfo.processInfo.environment["SKLTN_E2E_EXECUTABLE"],
+       !configuredPath.isEmpty {
+        let configuredURL = URL(fileURLWithPath: configuredPath)
+        guard FileManager.default.isExecutableFile(atPath: configuredURL.path) else {
+            throw E2EError.executableNotFound(configuredURL.path)
+        }
+        return configuredURL
+    }
+
     let root = projectRootURL()
     let candidates = [
         root.appendingPathComponent(".build/debug/skltn"),

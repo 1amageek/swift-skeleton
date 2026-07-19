@@ -43,13 +43,13 @@ Built on [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) for fast, acc
 |---|---|
 | `[impl:body,wire]` | Declaration-level summary, preserved by `--headers-only` |
 | `[impl!:trap]` | Configured high-confidence pattern such as an explicit not-implemented terminal |
-| `[impl?:const]` | Lexical or project-context heuristic requiring source review |
+| `[impl?:const]` | AST-pattern or project-context heuristic requiring source review |
 
 Reasons are `trap`, `empty`, `const`, `noop`, `flow`, `error`, `wire`, and `dead`. Protocol/interface requirements are not treated as empty implementations, and normal output suppresses findings classified as non-production.
 
 ### Trust boundary
 
-Implementation markers prioritize source review; they are not semantic verification. The analyzer uses parser-provided method ranges, lexical body evidence, and project-wide identifier references. It does not prove name resolution, types, control flow, data flow, dependency wiring, or reachability.
+Implementation markers prioritize source review; they are not semantic verification. Built-in parsers reduce the live AST to call, return, write, catch, branch, and trap evidence, then project-context heuristics add wiring and reachability signals. Method body text is not retained. Compatibility parsers that do not provide AST evidence use the range-based fallback analyzer. Neither path proves name resolution, types, semantic correctness, dependency wiring, or reachability.
 
 - Open every marked method range and use the original source as the authority.
 - Confirm invocation shape for `trap`, interpolation dependencies for `const`, handler scope for `error`, and construction or call paths for `wire` and `dead`.
@@ -122,17 +122,17 @@ cp -r SKILLS/skeleton ~/.claude/skills/skeleton
 
 ```bash
 # Full project skeleton
-skltn skeleton /path/to/project
+skltn get /path/to/project
 
 # Single file skeleton
-skltn skeleton /path/to/project --path Sources/MyFile.swift
+skltn get /path/to/project --path Sources/MyFile.swift
 
 # Compact project map
-skltn skeleton /path/to/project --headers-only
+skltn get /path/to/project --headers-only
 
 # Filter by language or declaration kind
-skltn skeleton /path/to/project --language swift
-skltn skeleton /path/to/project --kinds struct,actor
+skltn get /path/to/project --language swift
+skltn get /path/to/project --kinds struct,actor
 
 # Symbol search
 skltn query /path/to/project --q "MyClass" --limit 10
@@ -150,12 +150,13 @@ skltn install-skill
 skltn daemon
 ```
 
-`get_skeleton` and `build` are aliases for `skeleton`. `search` is an alias for `query`, and `diag` is an alias for `diagnostics`.
+The command may be omitted (`skltn /path/to/project`). `skeleton`, `get_skeleton`, and `build` remain compatibility aliases for `get`. `search` is an alias for `query`, and `diag` is an alias for `diagnostics`.
 
 ## Architecture
 
 ```
 SkeletonIndexCore          Language-agnostic core (protocols, models, formatter, index)
+SkeletonTreeSitterSupport  Shared AST implementation-evidence extraction
 SkeletonSwiftParser        Swift parser (Tree-sitter)
 SkeletonKotlinParser       Kotlin parser (Tree-sitter)
 SkeletonTypeScriptParser   TypeScript parser (Tree-sitter)
@@ -163,7 +164,7 @@ SkeletonGoParser           Go parser (Tree-sitter)
 SkeletonZigParser          Zig parser (Tree-sitter)
 SkeletonRustParser         Rust parser (Tree-sitter)
 SkeletonCppParser          C++ parser (Tree-sitter)
-SkeletonPythonParser       Python parser (indent-based AST)
+SkeletonPythonParser       Python parser (Tree-sitter)
 SkeletonJavaParser         Java parser (Tree-sitter)
 SkeletonIndexClient        EmbeddedService / SidecarService
 skltn                      CLI / JSON-RPC daemon

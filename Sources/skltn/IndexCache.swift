@@ -34,6 +34,7 @@ actor IndexCache {
                 path: parsedFile.path,
                 blocks: blocks,
                 hasParseError: parsedFile.hasParseError,
+                methodSyntaxEvidence: parsedFile.methodSyntaxEvidence,
                 implementationAnalysis: parsedFile.implementationAnalysis
             )
         }.filter { !$0.value.blocks.isEmpty }

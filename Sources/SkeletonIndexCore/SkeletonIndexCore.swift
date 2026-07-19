@@ -53,7 +53,8 @@ public struct SkeletonIndexCore: Sendable {
                 path: relativePath,
                 blocks: parsedFile.blocks,
                 source: source,
-                language: parser.languageName
+                language: parser.languageName,
+                syntaxEvidence: parsedFile.methodSyntaxEvidence
             )
             files[relativePath] = parsedFile.replacing(implementationAnalysis: analysis)
             sources[relativePath] = source
@@ -117,7 +118,8 @@ public struct SkeletonIndexCore: Sendable {
                 path: normalizedPath,
                 blocks: parsedFile.blocks,
                 source: source,
-                language: parser.languageName
+                language: parser.languageName,
+                syntaxEvidence: parsedFile.methodSyntaxEvidence
             )
             index.files[normalizedPath] = parsedFile.replacing(implementationAnalysis: analysis)
         }

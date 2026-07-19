@@ -38,6 +38,7 @@ func indexesAllCoreFiles() throws {
         "SkeletonParser.swift",
         "ImplementationFingerprint.swift",
         "ImplementationFinding.swift",
+        "MethodSyntaxEvidence.swift",
         "MethodImplementationAnalysis.swift",
         "FileImplementationAnalysis.swift",
         "ImplementationAnalyzing.swift",
@@ -446,7 +447,7 @@ func statusFileCount() throws {
     let index = try core.build(projectRoot: projectSourcesRoot())
     let status = core.status(index: index)
 
-    #expect(status.filesIndexed == 25)
+    #expect(status.filesIndexed == 26)
     #expect(status.parseErrorFiles == 0)
     #expect(status.isWatching == false)
     #expect(!status.lastUpdateTS.isEmpty)
@@ -740,6 +741,14 @@ func implementationMarkers() throws {
                     return false
                 }
 
+                func noOp(value: Int) {
+                    value + 1
+                }
+
+                func trapNamedParameter(fatalError: Int) -> Int {
+                    fatalError
+                }
+
                 func live(value: Int) -> Int {
                     value + 1
                 }
@@ -761,6 +770,8 @@ func implementationMarkers() throws {
     #expect(text.contains("trapped(Int) -> Int") && text.contains("[impl!:trap]"))
     #expect(text.contains("empty(Int)") && text.contains("[impl!:empty]"))
     #expect(text.contains("constant(Int) -> Bool") && text.contains("[impl?:const]"))
+    #expect(methodLine(named: "noOp", in: text).contains("[impl?:noop]"))
+    #expect(!methodLine(named: "trapNamedParameter", in: text).contains("[impl!:trap]"))
     #expect(!methodLine(named: "live", in: text).contains("[impl"))
     #expect(!methodLine(named: "init", in: text).contains("[impl"))
     #expect(!methodLine(named: "required", in: text).contains("[impl"))
@@ -854,6 +865,83 @@ func nonProductionFindingsAreSuppressed() throws {
     #expect(method?.fingerprint.implementationBinding == .testOnly)
 }
 
+@Test("wiring marker requires construction and production paths use exact classification")
+func contextIndexUsesConstructionAndExactPaths() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Contest.swift": """
+            struct FakeStore {}
+
+            struct Consumer {
+                let storeType: FakeStore.Type
+
+                func pending() {
+                    fatalError("pending")
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let text = core.getSkeleton(index: try core.build(projectRoot: projectRoot)).text
+
+    #expect(!headerLine(named: "FakeStore", in: text).contains("[impl:wire]"))
+    #expect(methodLine(named: "pending", in: text).contains("[impl!:trap]"))
+}
+
+@Test("dead marker ignores references found only in comments and strings")
+func deadMarkerUsesCodeReferences() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Production.swift": """
+            struct Production {
+                private func hidden() {
+                    work()
+                }
+
+                func documentation() -> String {
+                    // hidden() is intentionally mentioned in documentation.
+                    "hidden"
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let text = core.getSkeleton(index: try core.build(projectRoot: projectRoot)).text
+
+    #expect(methodLine(named: "hidden", in: text).contains("[impl?:dead]"))
+}
+
+@Test("dead marker preserves calls inside Swift string interpolation")
+func deadMarkerUsesSwiftStringInterpolationReferences() throws {
+    let projectRoot = try makeTemporaryProject(
+        files: [
+            "Production.swift": """
+            struct Production {
+                private func hidden() -> String {
+                    "value"
+                }
+
+                func documentation() -> String {
+                    "value=\\(hidden())"
+                }
+            }
+            """,
+        ]
+    )
+    defer { removeTemporaryProject(projectRoot) }
+
+    let core = makeCore()
+    let text = core.getSkeleton(index: try core.build(projectRoot: projectRoot)).text
+
+    #expect(!methodLine(named: "hidden", in: text).contains("[impl?:dead]"))
+}
+
 @Test("swallowed errors and collapsed branches use compact reasons")
 func errorAndFlowMarkers() throws {
     let projectRoot = try makeTemporaryProject(
@@ -887,6 +975,67 @@ func errorAndFlowMarkers() throws {
     #expect(methodLine(named: "swallowed", in: text).contains("[impl?:error]"))
     #expect(methodLine(named: "collapsed", in: text).contains("[impl?:flow]"))
     #expect(headerLine(named: "ControlFlow", in: text).contains("[impl:flow,error]"))
+}
+
+@Test("AST evidence does not flag switch mappings or observable catch handling")
+func astEvidenceAvoidsLSIFalsePositives() {
+    let source = """
+    import Foundation
+
+    struct ProductionMappings {
+        func statusRank(_ status: Status) -> Int {
+            switch status {
+            case .completed: return 0
+            case .cancelled: return 1
+            case .blocked: return 2
+            case .failed: return 3
+            }
+        }
+
+        func diagnosticCode(for error: Failure) -> String {
+            switch error {
+            case .missing: return "missing"
+            case .invalid: return "invalid"
+            }
+        }
+
+        func printError(data: Data) {
+            do {
+                FileHandle.standardError.write(data)
+            } catch {
+                FileHandle.standardError.write(Data("failed".utf8))
+            }
+        }
+
+        func translateError() throws {
+            do {
+                work()
+            } catch let error as DomainError {
+                throw error
+            } catch {
+                throw WrappedError(error)
+            }
+        }
+    }
+    """
+    let parser = swiftParser()
+    let parsed = parser.parse(path: "ProductionMappings.swift", source: source)
+    let analysis = DefaultImplementationAnalyzer().analyze(
+        path: "ProductionMappings.swift",
+        blocks: parsed.blocks,
+        source: source,
+        language: parser.languageName,
+        syntaxEvidence: parsed.methodSyntaxEvidence
+    )
+
+    #expect(parsed.methodSyntaxEvidence.count == 4)
+    #expect(!analysis.findings.contains { $0.methodName == "statusRank" && $0.reason == .noOperation })
+    #expect(!analysis.findings.contains { $0.methodName == "diagnosticCode" && $0.reason == .noOperation })
+    #expect(!analysis.findings.contains { $0.methodName == "printError" && $0.reason == .error })
+    #expect(
+        !analysis.findings.contains { $0.methodName == "translateError" && $0.reason == .error },
+        "\(parsed.methodSyntaxEvidence)"
+    )
 }
 
 @Test("incremental update replaces fingerprints and findings")

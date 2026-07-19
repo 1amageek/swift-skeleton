@@ -2,6 +2,7 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterJavaGrammar
 import SkeletonIndexCore
+import SkeletonTreeSitterSupport
 
 public struct JavaSkeletonParser: SkeletonParser, Sendable {
     public var languageName: String { "java" }
@@ -28,7 +29,12 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
         var blocks: [SkeletonBlock] = []
         collectBlocks(from: root, source: source, into: &blocks)
 
-        return ParsedFile(path: path, blocks: blocks, hasParseError: root.hasError)
+        let evidence = TreeSitterImplementationEvidenceExtractor().extract(
+            root: root, source: source, blocks: blocks, language: languageName
+        )
+        return ParsedFile(
+            path: path, blocks: blocks, hasParseError: root.hasError, methodSyntaxEvidence: evidence
+        )
     }
 
     private static let declarationTypes: Set<String> = [

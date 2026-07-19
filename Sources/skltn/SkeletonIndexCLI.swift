@@ -12,7 +12,7 @@ enum SkeletonIndexCLIMain {
         arguments.removeFirst()
 
         switch command {
-        case "skeleton", "get_skeleton", "build":
+        case "get", "skeleton", "get_skeleton", "build":
             try runSkeleton(arguments: arguments)
         case "query", "search":
             try runQuery(arguments: arguments)
@@ -158,6 +158,7 @@ enum SkeletonIndexCLIMain {
                 path: parsedFile.path,
                 blocks: blocks,
                 hasParseError: parsedFile.hasParseError,
+                methodSyntaxEvidence: parsedFile.methodSyntaxEvidence,
                 implementationAnalysis: parsedFile.implementationAnalysis
             )
         }.filter { $0.value.hasParseError || !$0.value.blocks.isEmpty }
@@ -263,7 +264,8 @@ enum SkeletonIndexCLIMain {
         print(
             """
             usage:
-              skltn [skeleton] [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
+              skltn get [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
+              skltn [project-root] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
               skltn query [project-root] --q <string> [--limit <n>] [--language <name>]
               skltn status [project-root] [--language <name>]
               skltn diagnostics [project-root] [--language <name>]
@@ -273,7 +275,7 @@ enum SkeletonIndexCLIMain {
               skltn install-skill
 
             aliases:
-              get_skeleton, build -> skeleton
+              skeleton, get_skeleton, build -> get
               search -> query
               diag -> diagnostics
             """

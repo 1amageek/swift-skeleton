@@ -1,4 +1,4 @@
-# AGENTS.md (Spec v1.1)
+# AGENTS.md (Current Spec)
 
 ## リポジトリ
 - Canonical: https://github.com/1amageek/swift-skeleton
@@ -11,23 +11,27 @@
 - 秘匿情報（`.env` など）は追跡対象にしない。
 
 ## 目的
-- v1は「当たり付け最優先」。宣言スケルトンと位置情報だけを高速に返す。
+- 「当たり付け最優先」で宣言スケルトンと位置情報を高速に返す。
+- 組み込みパーサはASTから短い実装証拠を生成し、レビュー対象を`[impl:*]`で示す。
 - 関数本文は保持しない。詳細はヒット後に原文へジャンプして確認する。
 - パース不全でも停止しない。部分出力し、不確実性を明示する。
 
-## スコープ（v1）
-- 対象: Swift
+## スコープ
+- 対象: Swift / Kotlin / TypeScript / Go / Zig / Rust / C++ / Python / Java
 - 実装: Swift + SPM
 - 形態:
   - Embedded: ライブラリ呼び出し
   - Sidecar: 常駐デーモン + JSON-RPC 2.0 (stdin/stdout)
-- パーサ: Tree-sitter Swift grammar
-- 対応OS: まずは macOS 優先（watchはv1任意）
+- CLI: `skltn`
+- パーサ: 各言語のTree-sitter grammar
+- 対応OS: macOS優先
 
-## 非スコープ（v1）
+## 非スコープ
 - 名前解決
 - 型推論
-- 関数本文抽出、呼び出し抽出
+- 関数本文の保持・出力
+- call graph生成や意味的な呼び出し解決
+- 実装アルゴリズムの正当性証明
 - LSP統合
 - コメント保持やコード整形
 
@@ -52,12 +56,20 @@
   - ファイル先頭に `# parse_error <filePath>`
   - ブロック内にERRORがあればヘッダ末尾に `(!)`
   - 不明は `?`（例: `[?-?]`, `start-?`）
+- 実装シグナル:
+  - ブロックヘッダ末尾: `[impl:<domains>]`
+  - メソッド末尾: `[impl!:<reason>]` または `[impl?:<reason>]`
+  - reasons: `trap` / `empty` / `const` / `noop` / `flow` / `error` / `wire` / `dead`
+  - `--headers-only`はブロック単位の実装シグナルを保持する。
 
 ## アーキテクチャ境界
 - `Core`
   - parse/build/update/queryの純機能
-  - Tree-sitterノードから宣言とrangeを抽出
-  - Skeletonテキストとメタデータを生成
+  - Skeletonテキスト、メタデータ、Implementation Fingerprintを生成
+- `TreeSitterSupport`
+  - Tree-sitterノードを本文非保持の実装証拠へ縮約
+- Language Parsers
+  - Tree-sitterノードから宣言、range、実装証拠を抽出
 - `Client`
   - `SkeletonIndexService` プロトコルを公開
   - `EmbeddedService` と `SidecarService` を透過化
@@ -66,25 +78,27 @@
   - status/diagnostics/update/query応答
   - watchは任意（未実装でもv1可）
 - `CLI`
-  - one-shot用途（build/get_skeleton/query）
+  - one-shot用途（`get` / `query` / `status` / `diagnostics` / `files` / `languages`）
+  - `get`が正式な取得コマンド。`skeleton` / `get_skeleton` / `build`は互換alias。
 
-## SPM構成目標
+## SPM構成
 - Products:
   - `SkeletonIndexCore` (library)
+  - `SkeletonSwiftParser`ほか言語別parser libraries
   - `SkeletonIndexClient` (library)
-  - `skeletonindexd` (executable)
-  - `skeletonindex` (executable)
+  - `skltn` (executable)
 - Targets:
-  - Core / Client / Daemon / CLI / Tests
+  - Core / TreeSitterSupport / Language Parsers / Client / CLI / Tests
 
-## ディレクトリ規約（実装時）
+## ディレクトリ規約
 - `/Users/1amageek/Desktop/swift-skeleton/Sources/SkeletonIndexCore`
+- `/Users/1amageek/Desktop/swift-skeleton/Sources/SkeletonTreeSitterSupport`
 - `/Users/1amageek/Desktop/swift-skeleton/Sources/SkeletonIndexClient`
-- `/Users/1amageek/Desktop/swift-skeleton/Sources/skeletonindexd`
-- `/Users/1amageek/Desktop/swift-skeleton/Sources/skeletonindex`
+- `/Users/1amageek/Desktop/swift-skeleton/Sources/Skeleton<Language>Parser`
+- `/Users/1amageek/Desktop/swift-skeleton/Sources/skltn`
 - `/Users/1amageek/Desktop/swift-skeleton/Tests` はターゲット対応で分割する
 
-## IPC契約（v1最小）
+## IPC契約
 - JSON-RPC 2.0
 - methods:
   - `index.open`
@@ -95,16 +109,13 @@
   - `index.diagnostics`
 - `index.query` は skeleton text 検索。ランキングは簡易実装で可。
 
-## 実装優先順位
-1. Package再編（products/targetsを仕様名に合わせる）
-2. CoreのAST抽出モデル（type/extension/props/methods/range）
-3. Formatter（出力契約を満たすテキスト生成）
-4. プロジェクト単位indexと差分update
-5. Embedded Client
-6. Sidecar Daemon（JSON-RPC loop）
-7. Sidecar Client
-8. CLI
-9. テスト整備（順序安定性、parse_error、不完全ブロック、query）
+## Implementation Fingerprint契約
+- 組み込みパーサはTree-sitter ASTが生存している間にcall / return / write / branch / catch / trapを証拠へ縮約する。
+- Coreへ関数本文テキストを渡して保持しない。
+- AST証拠を提供しない互換パーサにはrange-based fallback解析を適用する。
+- `wire`はfake-like型がproduction sourceでcallまたはconstruction targetになった場合のheuristicとする。
+- `dead`はprivateメソッドにproduction code上の参照がない場合のheuristicとし、コメントと文字列は参照に数えない。
+- シグナルは意味的正当性の証明ではない。原文確認を必須とする。
 
 ## テスト方針
 - テストは小さく分割して実行する。
@@ -115,6 +126,11 @@
   - 引数型不明 `?`
   - `parse_error` と `(!)` の表示
   - file/range の正しさ
+  - 9言語のAST実装証拠
+  - `trap` / `empty` / `const` / `noop` / `flow` / `error`の検出と誤検知回帰
+  - `wire` / `dead`のproduction context判定
+  - `skltn get`、省略形、互換alias
+- `SKLTN_E2E_EXECUTABLE`でrelease版またはインストール済みCLIをE2E対象に指定できること。
 
 ## 実装ルール
 - 関数本文テキストを保存しない。
@@ -128,3 +144,5 @@
 - 仕様の出力契約に一致するスケルトンを生成できる。
 - パース失敗を含むプロジェクトで処理継続できる。
 - `index.query` が file+range を返し、原文ジャンプに必要な情報を満たす。
+- 組み込み9言語がAST証拠を生成し、本文を保持せずImplementation Fingerprintを出力できる。
+- README、SKILL、埋め込みSKILL、インストール済みSKILL、CLI helpのコマンド契約が一致する。

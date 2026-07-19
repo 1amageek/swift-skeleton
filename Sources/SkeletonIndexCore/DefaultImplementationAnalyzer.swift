@@ -14,13 +14,36 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
         path: String,
         blocks: [SkeletonBlock],
         source: String,
-        language: String
+        language: String,
+        syntaxEvidence: [MethodSyntaxEvidence]
     ) -> FileImplementationAnalysis {
         var methods: [MethodImplementationAnalysis] = []
         var findings: [ImplementationFinding] = []
+        let evidenceByMethod = Dictionary(
+            syntaxEvidence.map { (evidenceKey(typeName: $0.typeName, methodName: $0.methodName, range: $0.range), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         for block in blocks {
             for method in block.methods {
+                if let evidence = evidenceByMethod[
+                    evidenceKey(typeName: block.typeName, methodName: method.name, range: method.range)
+                ] {
+                    let fingerprint = makeFingerprint(
+                        evidence: evidence,
+                        properties: block.properties.map(\.name)
+                    )
+                    let analysis = MethodImplementationAnalysis(
+                        typeName: block.typeName,
+                        methodName: method.name,
+                        range: method.range,
+                        isInitializer: method.isInitializer,
+                        fingerprint: fingerprint
+                    )
+                    methods.append(analysis)
+                    findings.append(contentsOf: makeFindings(analysis: analysis, evidence: evidence))
+                    continue
+                }
                 let methodSource = sourceSlice(source: source, range: method.range)
                 var body = extractBody(from: methodSource, language: language)
                 if isAbstractRequirement(
@@ -61,6 +84,121 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
             methods: methods,
             findings: findings
         )
+    }
+
+    private func evidenceKey(typeName: String, methodName: String, range: SourceRange) -> String {
+        "\(typeName)|\(methodName)|\(range.startLine ?? -1)|\(range.endLine ?? -1)"
+    }
+
+    public func analyze(
+        path: String,
+        blocks: [SkeletonBlock],
+        source: String,
+        language: String
+    ) -> FileImplementationAnalysis {
+        analyze(
+            path: path,
+            blocks: blocks,
+            source: source,
+            language: language,
+            syntaxEvidence: []
+        )
+    }
+
+    private func makeFingerprint(
+        evidence: MethodSyntaxEvidence,
+        properties: [String]
+    ) -> ImplementationFingerprint {
+        let referenced = Set(evidence.referencedIdentifiers)
+        let parameters = Set(evidence.parameterNames)
+        let propertySet = Set(properties)
+        let parameterReads = evidence.parameterNames.filter(referenced.contains)
+        let stateReads = properties.filter(referenced.contains)
+        let stateWrites = properties.filter { property in
+            evidence.assignmentTargets.contains(property)
+        }
+        let returnOrigins: [ImplementationFingerprint.ReturnOrigin] = orderedUnique(evidence.returns.map { value in
+            let identifiers = Set(value.identifiers)
+            if !identifiers.isDisjoint(with: parameters) { return .parameter }
+            if !identifiers.isDisjoint(with: propertySet) { return .state }
+            switch value.kind {
+            case .literal: return .literal
+            case .call: return .call
+            case .constructed: return .constructed
+            case .identifier, .unknown: return .unknown
+            }
+        })
+
+        var terminalBehaviors: [ImplementationFingerprint.TerminalBehavior] = []
+        if !evidence.trapCalls.isEmpty { terminalBehaviors.append(.traps) }
+        if evidence.throwsError { terminalBehaviors.append(.throwsError) }
+        if !evidence.returns.isEmpty { terminalBehaviors.append(.returns) }
+        if terminalBehaviors.isEmpty && evidence.bodyState == .concrete { terminalBehaviors.append(.fallsThrough) }
+
+        var externalEffects = stateWrites.map { "write:\($0)" }
+        externalEffects.append(contentsOf: evidence.callTargets.map { "call:\($0)" })
+        if evidence.throwsError { externalEffects.append("throw") }
+
+        return ImplementationFingerprint(
+            bodyState: evidence.bodyState,
+            syntaxState: evidence.syntaxState,
+            parameterReads: parameterReads,
+            returnOrigins: returnOrigins,
+            stateReads: stateReads,
+            stateWrites: stateWrites,
+            callTargets: evidence.callTargets,
+            controlFlowPaths: evidence.controlFlowPaths,
+            terminalBehaviors: orderedUnique(terminalBehaviors),
+            caughtErrors: evidence.catches.isEmpty ? [] : ["catch"],
+            asyncOperations: evidence.asyncOperations,
+            externalEffects: orderedUnique(externalEffects)
+        )
+    }
+
+    private func makeFindings(
+        analysis: MethodImplementationAnalysis,
+        evidence: MethodSyntaxEvidence
+    ) -> [ImplementationFinding] {
+        let fingerprint = analysis.fingerprint
+        guard fingerprint.bodyState != .absent, fingerprint.syntaxState == .complete else { return [] }
+
+        var findings: [ImplementationFinding] = []
+        if !evidence.trapCalls.isEmpty {
+            findings.append(finding(analysis: analysis, certainty: .definite, domain: .body, reason: .trap))
+        }
+        if fingerprint.bodyState == .empty {
+            if !analysis.isInitializer {
+                findings.append(finding(analysis: analysis, certainty: .definite, domain: .body, reason: .empty))
+            }
+            return findings
+        }
+
+        let unusedInputs = !evidence.parameterNames.isEmpty && fingerprint.parameterReads.isEmpty
+        let literalOnly = !fingerprint.returnOrigins.isEmpty && Set(fingerprint.returnOrigins) == [.literal]
+        let hasObservableWork = !fingerprint.stateWrites.isEmpty || !fingerprint.callTargets.isEmpty ||
+            fingerprint.terminalBehaviors.contains(.throwsError)
+        if unusedInputs && literalOnly && !hasObservableWork {
+            findings.append(finding(analysis: analysis, certainty: .suspicious, domain: .body, reason: .constant))
+        }
+        if !analysis.isInitializer && evidence.executableStatementCount > 0 && evidence.returns.isEmpty &&
+            !hasObservableWork && evidence.trapCalls.isEmpty {
+            findings.append(finding(analysis: analysis, certainty: .suspicious, domain: .body, reason: .noOperation))
+        }
+
+        let swallowedError = evidence.catches.contains { caught in
+            !caught.hasObservableEffect &&
+                (caught.returns.isEmpty || caught.returns.allSatisfy { $0.kind == .literal })
+        }
+        if swallowedError {
+            findings.append(finding(analysis: analysis, certainty: .suspicious, domain: .error, reason: .error))
+        }
+
+        let returns = evidence.returns
+        if evidence.controlFlowPaths > 1 && returns.count > 1 &&
+            Set(returns.map(\.signature)).count == 1 && returns.allSatisfy({ $0.kind == .literal }) {
+            findings.append(finding(analysis: analysis, certainty: .suspicious, domain: .flow, reason: .flow))
+        }
+        return findings
     }
 
     private func makeFingerprint(

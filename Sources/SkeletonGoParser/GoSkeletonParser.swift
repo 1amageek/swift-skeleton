@@ -2,6 +2,7 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterGoGrammar
 import SkeletonIndexCore
+import SkeletonTreeSitterSupport
 
 public struct GoSkeletonParser: SkeletonParser, Sendable {
     public var languageName: String { "go" }
@@ -58,7 +59,12 @@ public struct GoSkeletonParser: SkeletonParser, Sendable {
             )
         }
 
-        return ParsedFile(path: path, blocks: blocks, hasParseError: root.hasError)
+        let evidence = TreeSitterImplementationEvidenceExtractor().extract(
+            root: root, source: source, blocks: blocks, language: languageName
+        )
+        return ParsedFile(
+            path: path, blocks: blocks, hasParseError: root.hasError, methodSyntaxEvidence: evidence
+        )
     }
 
     private func extractTypeDeclaration(node: Node, source: String) -> SkeletonBlock? {

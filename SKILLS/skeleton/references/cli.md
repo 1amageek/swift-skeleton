@@ -3,7 +3,8 @@
 ## Commands
 
 ```text
-skltn [skeleton] [project-root] [skeleton-options]
+skltn get [project-root] [get-options]
+skltn [project-root] [get-options]
 skltn query [project-root] --q <text> [query-options]
 skltn query [project-root] <text> [query-options]
 skltn status [project-root] [language-options]
@@ -19,18 +20,19 @@ skltn -h
 
 If `project-root` is omitted, commands use the current working directory. The project root may also be passed with `--project-root` or `--root`.
 
-An unrecognized first positional token is treated as the project root for the default `skeleton` command.
+An unrecognized first positional token is treated as the project root for the default `get` command.
 
 ## Command aliases
 
 | Alias | Command |
 |---|---|
-| `get_skeleton` | `skeleton` |
-| `build` | `skeleton` |
+| `skeleton` | `get` |
+| `get_skeleton` | `get` |
+| `build` | `get` |
 | `search` | `query` |
 | `diag` | `diagnostics` |
 
-## Skeleton options
+## Get options
 
 | Option | Aliases | Behavior |
 |---|---|---|
