@@ -1,6 +1,6 @@
 ---
 name: skeleton
-description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, triaging likely stubs or fake wiring, or planning changes across files or modules.
+description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, working within a known SwiftPM target, triaging likely stubs or fake wiring, or planning changes across files or modules.
 ---
 
 # Skeleton
@@ -19,7 +19,28 @@ Use the path supplied by the user. If no path is supplied, use the current worki
 skltn get [project-root] [options]
 ```
 
-For a large repository, start with `--headers-only`. Use `--path <relative-file>` for one indexed file, `--language <name>` to restrict parsers, and `--kind <kind>` to restrict supported declaration kinds.
+Choose the narrowest view that preserves the context required by the task:
+
+- When a SwiftPM target or module is known, use `--target` by default. This keeps the focus target complete and adds only the source-visible surface of direct imported local dependencies.
+- For a large target, begin with `--headers-only`, then rerun without it only when member signatures are required.
+- When the user requests an exact file or directory boundary, use that path without target expansion.
+- When no target is known, begin with a repository-wide `--headers-only` map, identify the relevant target, then switch to target mode.
+
+```bash
+skltn get <package-root> --target <target-name> --headers-only
+skltn get <package-root> --target <target-name>
+```
+
+Use `--path <relative-file>` for one indexed file, `--language <name>` to restrict parsers, and `--kind <kind>` to restrict supported declaration kinds.
+
+Keep path and target intent distinct:
+
+```bash
+skltn get Sources/Feature
+skltn get Sources --target Feature
+```
+
+The first command strictly scans `Sources/Feature`. The second resolves the SwiftPM target, renders it in full, and adds only source-visible declarations from direct local dependencies that the target imports. Use `--access public` only when the task needs the externally consumable API surface rather than the target's full implementation-facing structure.
 
 The `get` command may be omitted. `skeleton`, `get_skeleton`, and `build` are compatibility aliases.
 
@@ -29,7 +50,7 @@ The `get` command may be omitted. `skeleton`, `get_skeleton`, and `build` are co
 skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 ```
 
-`search` is an alias. The default limit is 20. A match inside a property or method returns the enclosing declaration block header and that block's file range.
+`search` is an alias. The default limit is 20. A match inside a property or method returns the enclosing declaration block header; a standalone declaration returns its own signature and range.
 
 ### 4. Present results
 
@@ -59,9 +80,13 @@ Language filters accept repeated flags or comma-separated values. The default bu
 
 Kind filters accept `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. Parsers can emit additional language-specific header kinds, but the CLI does not accept those additional kinds as filter values.
 
+`--access` accepts `public`, `package`, `internal`, `fileprivate`, `private`, or `all`. It filters effective access, including containing-declaration caps. In target mode the focus module is unfiltered by default; imported local dependencies default to the visibility available from the focus target. Explicit `--access` applies to every module. A parser without access metadata produces an explicit unsupported-filter error.
+
 ## Output and diagnostics
 
 Indented lines contain typed properties and method signatures. Return types are printed whenever the parser extracts one, including `Void` or `void`.
+
+Target mode begins sections with `module <name>` and may add one compact `imports:` line. Dependency sections carry no role or visibility labels. Swift source-declared type aliases, associated types, enum cases, subscripts, top-level functions, and typed variables are retained as declaration signatures without implementation bodies.
 
 `# parse_error <file>` means the file contains a parse error or could not be parsed normally. Partial declaration blocks may still follow. `(!)` marks a declaration block containing an error node. Unknown line positions use `?`.
 

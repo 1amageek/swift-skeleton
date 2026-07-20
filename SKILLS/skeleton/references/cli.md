@@ -38,6 +38,8 @@ An unrecognized first positional token is treated as the project root for the de
 |---|---|---|
 | `--project-root <path>` | `--root` | Select the project directory instead of using a positional path. |
 | `--path <path>` | `--file` | Return one indexed file using its project-relative or absolute path. |
+| `--target <name>` | — | Resolve a SwiftPM target, render it in full, and include visible API from direct imported local dependencies. |
+| `--access <level>` | — | Filter by effective access: `public`, `package`, `internal`, `fileprivate`, `private`, or `all`. |
 | `--language <name>` | `--lang`, `--languages` | Restrict scanning to selected languages. |
 | `--kind <kind>` | `--kinds` | Keep selected declaration kinds after parsing. |
 | `--headers-only` | — | Keep declaration headers, parse markers, and `[impl:<domains>]` summaries; omit properties and methods. |
@@ -45,6 +47,8 @@ An unrecognized first positional token is treated as the project root for the de
 Language and kind options may be repeated or supplied as comma-separated values. Value options also accept the `--option=value` form.
 
 Accepted kind filter values are `class`, `struct`, `enum`, `protocol`, `actor`, and `extension`. This list is narrower than the language-specific keywords that parsers can emit in headers.
+
+A positional directory is always a strict scan boundary. `skltn get Sources/Feature` does not infer a target or expand dependencies. Use `skltn get Sources --target Feature` for the module-focused SwiftPM projection. Only direct local dependencies that are both declared and imported are expanded; external package source is not traversed.
 
 ## Query options and forms
 
@@ -56,7 +60,7 @@ Accepted kind filter values are `class`, `struct`, `enum`, `protocol`, `actor`, 
 
 With `--q`, the first remaining positional value is the project root. Without `--q`, two positional values mean project root followed by search text; one positional value means search text in the current working directory.
 
-Query searches declaration headers, inheritance, typed properties, method names, parameter types, and return types. Each result is the enclosing declaration block header with the block's file and range.
+Query searches declaration headers, inheritance, typed properties, method names, parameter types, return types, and standalone source declarations. Results carry the enclosing block or standalone declaration file and range.
 
 ## Inspection commands
 
@@ -74,4 +78,4 @@ Query searches declaration headers, inheritance, typed properties, method names,
 
 ## Output size
 
-Use `--headers-only` for a compact map. It preserves every line that does not begin with two spaces, including `# parse_error` and declaration-level implementation markers.
+Use `--headers-only` for a compact map. It keeps module/import context, block and standalone declaration headers, parse markers, and declaration-level implementation summaries while omitting block members.

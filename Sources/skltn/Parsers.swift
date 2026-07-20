@@ -1,56 +1,61 @@
 import SkeletonIndexCore
+import SkeletonSwiftPMProjectSupport
 import SkeletonSwiftParser
 
 #if kotlin
-import SkeletonKotlinParser
+  import SkeletonKotlinParser
 #endif
 #if typescript
-import SkeletonTypeScriptParser
+  import SkeletonTypeScriptParser
 #endif
 #if go
-import SkeletonGoParser
+  import SkeletonGoParser
 #endif
 #if zig
-import SkeletonZigParser
+  import SkeletonZigParser
 #endif
 #if rust
-import SkeletonRustParser
+  import SkeletonRustParser
 #endif
 #if cpp
-import SkeletonCppParser
+  import SkeletonCppParser
 #endif
 #if python
-import SkeletonPythonParser
+  import SkeletonPythonParser
 #endif
 #if java
-import SkeletonJavaParser
+  import SkeletonJavaParser
 #endif
 
 func allParsers() -> [any SkeletonParser] {
-    var parsers: [any SkeletonParser] = [SwiftSkeletonParser()]
-    #if kotlin
+  var parsers: [any SkeletonParser] = [SwiftSkeletonParser()]
+  #if kotlin
     parsers.append(KotlinSkeletonParser())
-    #endif
-    #if typescript
+  #endif
+  #if typescript
     parsers.append(TypeScriptSkeletonParser())
-    #endif
-    #if go
+  #endif
+  #if go
     parsers.append(GoSkeletonParser())
-    #endif
-    #if zig
+  #endif
+  #if zig
     parsers.append(ZigSkeletonParser())
-    #endif
-    #if rust
+  #endif
+  #if rust
     parsers.append(RustSkeletonParser())
-    #endif
-    #if cpp
+  #endif
+  #if cpp
     parsers.append(CppSkeletonParser())
-    #endif
-    #if python
+  #endif
+  #if python
     parsers.append(PythonSkeletonParser())
-    #endif
-    #if java
+  #endif
+  #if java
     parsers.append(JavaSkeletonParser())
-    #endif
-    return parsers
+  #endif
+  return parsers
+}
+
+func allProjectStructureResolvers() -> [any ProjectStructureResolving] {
+  [SwiftPMProjectStructureResolver()]
 }

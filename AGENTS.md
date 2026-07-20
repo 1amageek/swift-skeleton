@@ -117,6 +117,16 @@
 - `dead`はprivateメソッドにproduction code上の参照がない場合のheuristicとし、コメントと文字列は参照に数えない。
 - シグナルは意味的正当性の証明ではない。原文確認を必須とする。
 
+## Zero-Copy実装契約
+- source file content は parser / index pipeline の入力 owner として扱い、Core へは本文ではなく byte range、line/column、短い実装証拠だけを渡す。
+- Tree-sitter node から本文文字列を生成して保持しない。判定は node kind、child relation、byte range、短い token class へ縮約する。
+- multi-language parser では、言語ごとに source buffer を再 `String` / `Array` / `Data` 化しない。必要な view と range を渡す。
+- skeleton text の生成時だけ、出力に必要な declaration name / type reference / signature fragment を materialize する。
+- `Implementation Fingerprint` は本文のコピーではなく、構造化された evidence と reason code として保存する。
+- range-based fallback 解析は、source owner と byte range を受け取り、巨大な中間文字列を生成しない。
+- copy が必要な場合は、所有権切り替え、外部 API 境界、永続化境界のどれに該当するかをコードコメントまたは設計メモに明示する。
+- ゼロコピー化した path は、E2E または focused test で output contract が変わらないことを確認する。
+
 ## テスト方針
 - テストは小さく分割して実行する。
 - 各テスト実行はタイムアウト付きにする（推奨30秒）。

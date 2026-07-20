@@ -127,6 +127,15 @@ skltn get /path/to/project
 # Single file skeleton
 skltn get /path/to/project --path Sources/MyFile.swift
 
+# Strict directory scope (only Sources/Feature)
+skltn get /path/to/project/Sources/Feature
+
+# Focus one SwiftPM target and include visible API from imported local dependencies
+skltn get /path/to/project/Sources --target Feature
+
+# Apply an effective-access filter to every rendered declaration
+skltn get /path/to/project/Sources --target Feature --access public
+
 # Compact project map
 skltn get /path/to/project --headers-only
 
@@ -152,12 +161,26 @@ skltn daemon
 
 The command may be omitted (`skltn /path/to/project`). `skeleton`, `get_skeleton`, and `build` remain compatibility aliases for `get`. `search` is an alias for `query`, and `diag` is an alias for `diagnostics`.
 
+`--target` is intentionally different from a path. A positional directory remains a strict scan of that directory. SwiftPM target mode resolves `Package.swift`, renders the focus target in full, and then renders only source-visible declarations from direct local dependencies that the target actually imports. It does not traverse external package sources or add dependency-role/access labels. `--access` accepts `public`, `package`, `internal`, `fileprivate`, `private`, or `all` and uses effective Swift access rather than modifier text.
+
+Target output is compact and module-oriented:
+
+```text
+module Feature
+  imports: FeatureTwo
+struct FeatureAPI [Sources/Feature/FeatureAPI.swift:3-12]
+
+module FeatureTwo
+struct PublicDependency [Sources/FeatureTwo/PublicDependency.swift:1-8]
+```
+
 ## Architecture
 
 ```
 SkeletonIndexCore          Language-agnostic core (protocols, models, formatter, index)
 SkeletonTreeSitterSupport  Shared AST implementation-evidence extraction
 SkeletonSwiftParser        Swift parser (Tree-sitter)
+SkeletonSwiftPMProjectSupport SwiftPM target graph adapter
 SkeletonKotlinParser       Kotlin parser (Tree-sitter)
 SkeletonTypeScriptParser   TypeScript parser (Tree-sitter)
 SkeletonGoParser           Go parser (Tree-sitter)
@@ -195,10 +218,18 @@ let core = SkeletonIndexCore(parsers: [
 
 ```swift
 import SkeletonIndexCore
+import SkeletonSwiftPMProjectSupport
 import SkeletonSwiftParser
 
-let core = SkeletonIndexCore(parsers: [SwiftSkeletonParser()])
-let index = try core.build(projectRoot: "/path/to/project")
+let core = SkeletonIndexCore(
+    parsers: [SwiftSkeletonParser()],
+    projectStructureResolvers: [SwiftPMProjectStructureResolver()]
+)
+let index = try core.build(
+    projectRoot: "/path/to/project/Sources",
+    languages: ["swift"],
+    targetName: "Feature"
+)
 let skeleton = core.getSkeleton(index: index)
 print(skeleton.text)
 

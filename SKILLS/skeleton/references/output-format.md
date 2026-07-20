@@ -3,11 +3,15 @@
 ## Structure
 
 ```text
+module <Focus>
+  imports: <ImportedModule>, ...
 <kind> <Name>[: Inheritance] [<file>:<start>-<end>] [(!)] [impl:<domains>]
   props: <name>:<Type>, ...
   methods:
     <name>(<ParamTypes>) [-> <ReturnType>] [<start>-<end>] [impl!|?:<reason>]
 ```
+
+Target mode emits the focus module first, followed by direct imported local dependency modules. Module headers do not identify dependency roles or access levels. The focus module is complete unless an explicit access filter is supplied; dependency declarations are filtered to what the focus target can see.
 
 ## Declaration headers
 
@@ -40,6 +44,10 @@ Methods include parameter types without parameter names. Unknown parameter types
 A parsed return type is emitted after `->`, including `Void` and `void`. The return segment is omitted when the parser does not extract a return type.
 
 Method ranges are relative to the containing file.
+
+## Additional Swift declarations
+
+Swift source-declared type aliases, associated types, enum cases, subscripts, top-level functions, operators, macros, and typed variables are emitted as compact signatures with ranges. Function and computed-property bodies are excluded. Member forms appear under `declarations:`; top-level forms include the file path in their range.
 
 ## Special markers
 
