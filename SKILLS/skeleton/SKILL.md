@@ -1,11 +1,11 @@
 ---
 name: skeleton
-description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, working within a known SwiftPM target, triaging likely stubs or fake wiring, or planning changes across files or modules.
+description: Extract and navigate a compact structural map and implementation-risk signals for a codebase with the skltn CLI, including declarations, signatures, inheritance, source ranges, parser-range-derived implementation fingerprints, and project-context heuristics. Use when exploring architecture, locating symbols, reviewing an unfamiliar repository, working within a known SwiftPM target, triaging likely stubs or fake wiring, or planning changes across files or modules. Treat the output only as a navigation aid; read the original implementation, relevant callers, and behavioral tests before judging behavior, changing code, or reporting completion.
 ---
 
 # Skeleton
 
-Use `skltn` to inspect declarations without loading implementation bodies.
+Use `skltn` to locate the source that requires inspection without loading implementation bodies. Treat its output as a structural index, never as implementation truth.
 
 ## Workflow
 
@@ -44,7 +44,24 @@ The first command strictly scans `Sources/Feature`. The second resolves the Swif
 
 The `get` command may be omitted. `skeleton`, `get_skeleton`, and `build` are compatibility aliases.
 
-### 3. Search indexed declarations
+### 3. Verify the selected source
+
+Use the skeleton map to choose files and ranges, then read the original code before making an implementation claim or change. For each relevant path:
+
+1. Read the complete implementation at the reported range, including adjacent branches and error handling.
+2. Read the immediate callers and the concrete dependencies used by that path.
+3. Read behavioral tests covering successful and failed execution, not only declaration, type, or construction checks.
+4. Inspect critical unmarked paths when correctness matters; an absent marker means only that no configured pattern matched.
+
+When auditing incomplete implementation, also scan the source marker that `skltn` does not index:
+
+```bash
+rg -n 'FIXME\(INCOMPLETE_IMPLEMENTATION\)' <package-root>/Sources
+```
+
+Proceed without source inspection only for a purely structural inventory. Label such conclusions as structural and make no claims about runtime behavior, completeness, correctness, or test adequacy.
+
+### 4. Search indexed declarations
 
 ```bash
 skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
@@ -52,13 +69,13 @@ skltn query [project-root] --q <text> [--limit <count>] [--language <name>]
 
 `search` is an alias. The default limit is 20. A match inside a property or method returns the enclosing declaration block header; a standalone declaration returns its own signature and range.
 
-### 4. Present results
+### 5. Present results
 
 - Use unindented declaration headers as the structural overview.
 - Prioritize declarations with `[impl:<domains>]`, then open the marked method ranges in the original source.
 - Treat `[impl!:<reason>]` as a configured high-confidence pattern match and `[impl?:<reason>]` as a heuristic review signal.
 - Use the original source as the authority before concluding that an implementation is fake, incomplete, wired incorrectly, or unreachable.
-- When correctness is the goal, inspect critical unmarked paths too; no marker means only that the configured patterns found no signal.
+- Base behavioral conclusions on inspected source and tests, not skeleton text or markers.
 - Treat unindented `# parse_error` lines as diagnostics, not declarations.
 - Preserve file paths and ranges so the user can open the original source.
 - If full output is too large, rerun with `--headers-only` and report that the compact view omits properties and methods.

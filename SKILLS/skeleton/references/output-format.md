@@ -79,6 +79,8 @@ These markers are review signals, not semantic verification. No marker means no 
 
 Built-in parsers use parser-provided AST evidence and a project-wide identifier/call index. Compatibility parsers that omit AST evidence use range-based fallback analysis. Neither path retains method body text or proves name resolution, types, semantic correctness, dependency wiring, or reachability.
 
+Use this output to select what to read, not as evidence that an implementation works. Before making a behavioral conclusion, inspect the complete original implementation, its immediate callers and dependencies, and success/failure tests.
+
 Use the original source as the authority. Confirm invocation shape for trap findings, dependencies inside interpolated or quoted expressions for constant findings, the relevant handler scope for error findings, and construction or call paths for wire and dead findings. Path-based non-production classification can suppress rendered findings, so inspect indexed paths directly when classification affects the audit.
 
 ## Ordering
