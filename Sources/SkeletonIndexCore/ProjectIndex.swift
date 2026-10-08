@@ -6,7 +6,11 @@ public struct ProjectIndex: Sendable {
   public let projectStructure: ProjectStructure?
   public let focusUnitID: String?
   public let dependencyUnitIDs: [String]
-  public let fileUnitIDs: [String: String]
+  public var fileUnitIDs: [String: String]
+  /// Normalized language names the index was opened with; empty means every registered parser.
+  public let languages: [String]
+  /// Absolute source roots the index covers; empty means the whole project root.
+  public let scopeRoots: [String]
 
   public init(
     projectRoot: String,
@@ -16,7 +20,9 @@ public struct ProjectIndex: Sendable {
     projectStructure: ProjectStructure? = nil,
     focusUnitID: String? = nil,
     dependencyUnitIDs: [String] = [],
-    fileUnitIDs: [String: String] = [:]
+    fileUnitIDs: [String: String] = [:],
+    languages: [String] = [],
+    scopeRoots: [String] = []
   ) {
     self.projectRoot = projectRoot
     self.files = files
@@ -26,5 +32,7 @@ public struct ProjectIndex: Sendable {
     self.focusUnitID = focusUnitID
     self.dependencyUnitIDs = dependencyUnitIDs
     self.fileUnitIDs = fileUnitIDs
+    self.languages = languages
+    self.scopeRoots = scopeRoots
   }
 }

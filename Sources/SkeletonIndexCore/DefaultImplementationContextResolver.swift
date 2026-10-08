@@ -55,7 +55,11 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
             let nonProduction = isNonProduction(path: path)
             let source = sources[path] ?? ""
             var resolvedMethods: [MethodImplementationAnalysis] = []
-            var findings = nonProduction ? [] : file.implementationAnalysis.findings
+            // This resolver owns the wire and dead domains; drop any earlier context findings
+            // so a re-resolve after an incremental update matches a fresh build.
+            var findings = nonProduction ? [] : file.implementationAnalysis.findings.filter {
+                $0.domain != .wire && $0.domain != .dead
+            }
 
             for method in file.implementationAnalysis.methods {
                 let binding = implementationBinding(
@@ -205,41 +209,98 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
             for identifier in rawIdentifierTokens(in: code) {
                 identifierCounts[identifier, default: 0] += 1
             }
-            for target in callTargets(in: code) {
+            for target in callTargets(in: code, usesNamedConstructors: usesNamedConstructors(path: path)) {
                 callCounts[target, default: 0] += 1
             }
         }
         return ProjectIdentifierIndex(identifierCounts: identifierCounts, callCounts: callCounts)
     }
 
-    private func callTargets(in source: String) -> [String] {
+    /// Counts `Name(` call sites. Declaration sites that share that shape are skipped:
+    /// a name introduced by a declaration keyword (`class Name(Base)`, `def Name(`) and,
+    /// in languages whose constructors are named after the type, constructor definitions
+    /// (`Name(...) {`, `Name(...) : init`). `new Name(...) {` stays a construction.
+    private func callTargets(in source: String, usesNamedConstructors: Bool) -> [String] {
         let excluded: Set<String> = [
             "catch", "for", "guard", "if", "match", "raise", "return", "sizeof", "switch", "throw",
             "typeof", "when", "while",
         ]
+        let declarationKeywords: Set<String> = [
+            "actor", "class", "def", "enum", "fn", "fun", "func", "function", "interface", "object",
+            "protocol", "record", "struct", "trait", "union",
+        ]
+        let characters = Array(source)
         var result: [String] = []
-        var index = source.startIndex
-        while index < source.endIndex {
-            guard source[index].isLetter || source[index] == "_" else {
-                index = source.index(after: index)
+        var previousIdentifier: String?
+        var index = 0
+        while index < characters.count {
+            guard characters[index].isLetter || characters[index] == "_" else {
+                if !characters[index].isWhitespace {
+                    previousIdentifier = nil
+                }
+                index += 1
                 continue
             }
             let start = index
-            index = source.index(after: index)
-            while index < source.endIndex &&
-                (source[index].isLetter || source[index].isNumber || source[index] == "_") {
-                index = source.index(after: index)
+            index += 1
+            while index < characters.count && isIdentifierContinuation(characters[index]) {
+                index += 1
             }
-            let identifier = String(source[start..<index])
+            let identifier = String(characters[start..<index])
+            defer { previousIdentifier = identifier }
             var lookahead = index
-            while lookahead < source.endIndex && source[lookahead].isWhitespace {
-                lookahead = source.index(after: lookahead)
+            while lookahead < characters.count && characters[lookahead].isWhitespace {
+                lookahead += 1
             }
-            if lookahead < source.endIndex && source[lookahead] == "(" && !excluded.contains(identifier) {
-                result.append(identifier)
+            guard lookahead < characters.count, characters[lookahead] == "(",
+                  !excluded.contains(identifier) else {
+                continue
             }
+            if let previousIdentifier, declarationKeywords.contains(previousIdentifier) {
+                continue
+            }
+            if usesNamedConstructors && previousIdentifier != "new" &&
+                isConstructorDefinition(characters: characters, openParenthesis: lookahead) {
+                continue
+            }
+            result.append(identifier)
         }
         return result
+    }
+
+    private func usesNamedConstructors(path: String) -> Bool {
+        let constructorNamedExtensions: Set<String> = [
+            "java", "c", "cc", "cpp", "cxx", "h", "hh", "hpp", "hxx", "cs",
+        ]
+        return constructorNamedExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased())
+    }
+
+    private func isConstructorDefinition(characters: [Character], openParenthesis: Int) -> Bool {
+        var depth = 0
+        var cursor = openParenthesis
+        while cursor < characters.count {
+            if characters[cursor] == "(" {
+                depth += 1
+            } else if characters[cursor] == ")" {
+                depth -= 1
+                if depth == 0 { break }
+            }
+            cursor += 1
+        }
+        guard cursor < characters.count else { return false }
+        cursor += 1
+        while cursor < characters.count && characters[cursor].isWhitespace {
+            cursor += 1
+        }
+        guard cursor < characters.count else { return false }
+        if characters[cursor] == "{" {
+            return true
+        }
+        if characters[cursor] == ":" {
+            return cursor + 1 >= characters.count || characters[cursor + 1] != ":"
+        }
+        let trailingWord = characters[cursor...].prefix { isIdentifierContinuation($0) }
+        return String(trailingWord) == "throws" || String(trailingWord) == "noexcept"
     }
 
     private func rawIdentifierTokens(in source: String) -> [String] {

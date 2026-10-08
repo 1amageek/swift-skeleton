@@ -45,7 +45,8 @@ public struct SkeletonIndexCore: Sendable {
       throw SkeletonError.invalidProjectRoot(projectRoot)
     }
 
-    let activeParsers = try parsers(for: languages)
+    let normalizedLanguages = try validatedLanguages(languages)
+    let activeParsers = parsers(for: normalizedLanguages)
     guard let targetName else {
       let parsed = try parseSourceRoots(
         [requestedRootURL],
@@ -58,7 +59,9 @@ public struct SkeletonIndexCore: Sendable {
         projectRoot: requestedRootURL.path,
         files: files,
         lastUpdateTS: timestamp(),
-        isWatching: false
+        isWatching: false,
+        languages: normalizedLanguages,
+        scopeRoots: [requestedRootURL.path]
       )
     }
 
@@ -67,28 +70,38 @@ public struct SkeletonIndexCore: Sendable {
       let available = structure.units.map(\.name).sorted().joined(separator: ",")
       throw SkeletonError.targetNotFound("\(targetName); available=\(available)")
     }
+    return try buildTargetIndex(
+      structure: structure,
+      focusUnit: focusUnit,
+      languages: normalizedLanguages,
+      parsers: activeParsers
+    )
+  }
+
+  private func buildTargetIndex(
+    structure: ProjectStructure,
+    focusUnit: ProjectUnit,
+    languages: [String],
+    parsers activeParsers: [any SkeletonParser]
+  ) throws -> ProjectIndex {
     let focusRoots = focusUnit.sourceRoots.map { URL(fileURLWithPath: $0).standardizedFileURL }
     guard !focusRoots.isEmpty else {
-      throw SkeletonError.targetSourceUnavailable(targetName)
+      throw SkeletonError.targetSourceUnavailable(focusUnit.name)
     }
 
     let outputRoot = URL(fileURLWithPath: structure.projectRoot).standardizedFileURL
     let focusParsed = try parseSourceRoots(
       focusRoots, outputRoot: outputRoot, parsers: activeParsers)
     guard !focusParsed.files.isEmpty else {
-      throw SkeletonError.targetSourceUnavailable(targetName)
+      throw SkeletonError.targetSourceUnavailable(focusUnit.name)
     }
     let importedModules = Set(focusParsed.files.values.flatMap(\.imports).map(\.moduleName))
-    let dependencyUnits = focusUnit.dependencies.compactMap { dependency -> ProjectUnit? in
-      guard let localUnitID = dependency.localUnitID,
-        let unit = structure.unit(id: localUnitID),
-        importedModules.contains(unit.moduleName) || importedModules.contains(unit.name),
-        supportsAccessProjection(unit: unit, parsers: activeParsers)
-      else {
-        return nil
-      }
-      return unit
-    }.sorted { $0.name < $1.name }
+    let dependencyUnits = try selectDependencyUnits(
+      focusUnit: focusUnit,
+      structure: structure,
+      importedModules: importedModules,
+      parsers: activeParsers
+    )
 
     let dependencyRoots =
       dependencyUnits
@@ -120,8 +133,30 @@ public struct SkeletonIndexCore: Sendable {
       projectStructure: structure,
       focusUnitID: focusUnit.id,
       dependencyUnitIDs: dependencyUnits.map(\.id),
-      fileUnitIDs: fileUnitIDs
+      fileUnitIDs: fileUnitIDs,
+      languages: languages,
+      scopeRoots: (focusRoots + dependencyRoots).map(\.path)
     )
+  }
+
+  private func selectDependencyUnits(
+    focusUnit: ProjectUnit,
+    structure: ProjectStructure,
+    importedModules: Set<String>,
+    parsers activeParsers: [any SkeletonParser]
+  ) throws -> [ProjectUnit] {
+    var units: [ProjectUnit] = []
+    for dependency in focusUnit.dependencies {
+      guard let localUnitID = dependency.localUnitID,
+        let unit = structure.unit(id: localUnitID),
+        importedModules.contains(unit.moduleName) || importedModules.contains(unit.name),
+        try supportsAccessProjection(unit: unit, parsers: activeParsers)
+      else {
+        continue
+      }
+      units.append(unit)
+    }
+    return units.sorted { $0.name < $1.name }
   }
 
   public func status(index: ProjectIndex) -> IndexStatus {
@@ -186,53 +221,90 @@ public struct SkeletonIndexCore: Sendable {
     changedPaths: [String],
     removedPaths: [String]
   ) throws -> IndexStatus {
+    let activeParsers = parsers(for: index.languages)
+    let rootURL = URL(fileURLWithPath: index.projectRoot).standardizedFileURL
+    let scopeRootURLs = (index.scopeRoots.isEmpty ? [index.projectRoot] : index.scopeRoots)
+      .map { URL(fileURLWithPath: $0).standardizedFileURL }
+
     for removedPath in removedPaths {
-      let normalizedPath = normalizePath(removedPath, projectRoot: index.projectRoot)
+      let normalizedPath = normalizePath(
+        absoluteURL(for: removedPath, projectRoot: rootURL).path,
+        projectRoot: rootURL.path
+      )
       index.files.removeValue(forKey: normalizedPath)
+      index.fileUnitIDs.removeValue(forKey: normalizedPath)
     }
 
     for changedPath in changedPaths {
-      let normalizedPath = normalizePath(changedPath, projectRoot: index.projectRoot)
-      let absolutePath = URL(fileURLWithPath: index.projectRoot).appendingPathComponent(
-        normalizedPath
-      ).path
-      if !FileManager.default.fileExists(atPath: absolutePath) {
+      let fileURL = absoluteURL(for: changedPath, projectRoot: rootURL)
+      let normalizedPath = normalizePath(fileURL.path, projectRoot: rootURL.path)
+      // A path that a fresh build of the same scope would not index is dropped, not parsed.
+      guard isIndexable(fileURL, scopeRoots: scopeRootURLs, parsers: activeParsers),
+        let parser = parser(for: normalizedPath, in: activeParsers),
+        FileManager.default.fileExists(atPath: fileURL.path)
+      else {
         index.files.removeValue(forKey: normalizedPath)
+        index.fileUnitIDs.removeValue(forKey: normalizedPath)
         continue
       }
-      let source: String
-      do {
-        source = try String(contentsOfFile: absolutePath, encoding: .utf8)
-      } catch {
-        throw SkeletonError.fileReadFailed(normalizedPath)
+      let source = try readSource(at: fileURL, displayPath: normalizedPath)
+      index.files[normalizedPath] = parseFile(path: normalizedPath, source: source, parser: parser)
+      if let unitID = unitID(forFile: normalizedPath, index: index, outputRoot: rootURL) {
+        index.fileUnitIDs[normalizedPath] = unitID
       }
-      guard let parser = parser(for: normalizedPath, in: parsers) else {
-        continue
-      }
-      let parsedFile = parser.parse(path: normalizedPath, source: source)
-      let analysis = implementationAnalyzer.analyze(
-        path: normalizedPath,
-        blocks: parsedFile.blocks,
-        source: source,
-        language: parser.languageName,
-        syntaxEvidence: parsedFile.methodSyntaxEvidence
-      )
-      index.files[normalizedPath] = parsedFile.replacing(implementationAnalysis: analysis)
+    }
+
+    if let rebuilt = try rebuildIfTargetDependenciesChanged(index: index, outputRoot: rootURL) {
+      index = rebuilt
+      return status(index: index)
     }
 
     var sources: [String: String] = [:]
     for path in index.files.keys.sorted() {
-      let absolutePath = URL(fileURLWithPath: index.projectRoot).appendingPathComponent(path).path
-      do {
-        sources[path] = try String(contentsOfFile: absolutePath, encoding: .utf8)
-      } catch {
-        throw SkeletonError.fileReadFailed(path)
-      }
+      sources[path] = try readSource(
+        at: rootURL.appendingPathComponent(path), displayPath: path)
     }
     index.files = implementationContextResolver.resolve(files: index.files, sources: sources)
 
     index.lastUpdateTS = timestamp()
     return status(index: index)
+  }
+
+  /// Target views select dependency units from the focus imports, so an import change
+  /// re-runs target selection against the structure resolved at open time.
+  private func rebuildIfTargetDependenciesChanged(
+    index: ProjectIndex,
+    outputRoot: URL
+  ) throws -> ProjectIndex? {
+    guard let structure = index.projectStructure,
+      let focusUnitID = index.focusUnitID,
+      let focusUnit = structure.unit(id: focusUnitID)
+    else {
+      return nil
+    }
+    let activeParsers = parsers(for: index.languages)
+    let importedModules = Set(
+      index.files
+        .filter { unit(focusUnit, contains: $0.key, outputRoot: outputRoot) }
+        .values
+        .flatMap(\.imports)
+        .map(\.moduleName)
+    )
+    let selectedUnitIDs = try selectDependencyUnits(
+      focusUnit: focusUnit,
+      structure: structure,
+      importedModules: importedModules,
+      parsers: activeParsers
+    ).map(\.id)
+    guard selectedUnitIDs != index.dependencyUnitIDs else {
+      return nil
+    }
+    return try buildTargetIndex(
+      structure: structure,
+      focusUnit: focusUnit,
+      languages: index.languages,
+      parsers: activeParsers
+    )
   }
 
   public func query(index: ProjectIndex, q: String, limit: Int = 20) -> [QueryHit] {
@@ -352,22 +424,27 @@ public struct SkeletonIndexCore: Sendable {
     )
   }
 
-  private func parsers(for languages: [String]) throws -> [any SkeletonParser] {
-    let normalizedLanguages =
-      languages
-      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-      .filter { !$0.isEmpty }
-
-    guard !normalizedLanguages.isEmpty else {
-      return parsers
+  private func validatedLanguages(_ languages: [String]) throws -> [String] {
+    var normalizedLanguages: [String] = []
+    for language in languages {
+      let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      if !normalized.isEmpty && !normalizedLanguages.contains(normalized) {
+        normalizedLanguages.append(normalized)
+      }
     }
 
-    let supported = supportedLanguages
+    let supported = Set(supportedLanguages.map { $0.lowercased() })
     let unsupported = normalizedLanguages.filter { !supported.contains($0) }
     if !unsupported.isEmpty {
       throw SkeletonError.unsupportedLanguage(unsupported.joined(separator: ","))
     }
+    return normalizedLanguages
+  }
 
+  private func parsers(for normalizedLanguages: [String]) -> [any SkeletonParser] {
+    guard !normalizedLanguages.isEmpty else {
+      return parsers
+    }
     return parsers.filter { normalizedLanguages.contains($0.languageName.lowercased()) }
   }
 
@@ -379,8 +456,8 @@ public struct SkeletonIndexCore: Sendable {
   private func supportsAccessProjection(
     unit: ProjectUnit,
     parsers: [any SkeletonParser]
-  ) -> Bool {
-    let sourceURLs = sourceFileURLs(
+  ) throws -> Bool {
+    let sourceURLs = try sourceFileURLs(
       rootURLs: unit.sourceRoots.map { URL(fileURLWithPath: $0).standardizedFileURL },
       parsers: parsers
     )
@@ -388,19 +465,21 @@ public struct SkeletonIndexCore: Sendable {
     return !relevantParsers.isEmpty && relevantParsers.allSatisfy(\.supportsAccessControl)
   }
 
-  private static let excludedPaths: [String] = [
-    "/.build/",
-    "/.swiftpm/",
-    "/node_modules/",
-    "/vendor/",
-    "/target/",
-    "/__pycache__/",
-    "/.venv/",
-    "/venv/",
-    "/zig-cache/",
-    "/zig-out/",
-    "/build/",
-    "/out/",
+  /// Directory names excluded below a scanned root. Ancestors of the root are never matched,
+  /// so a project located under e.g. `/build/` is still indexed.
+  private static let excludedDirectoryNames: Set<String> = [
+    ".build",
+    ".swiftpm",
+    "node_modules",
+    "vendor",
+    "target",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "zig-cache",
+    "zig-out",
+    "build",
+    "out",
   ]
 
   private func parseSourceRoots(
@@ -410,33 +489,40 @@ public struct SkeletonIndexCore: Sendable {
   ) throws -> (files: [String: ParsedFile], sources: [String: String]) {
     var files: [String: ParsedFile] = [:]
     var sources: [String: String] = [:]
-    for absoluteURL in sourceFileURLs(rootURLs: rootURLs, parsers: parsers) {
+    for absoluteURL in try sourceFileURLs(rootURLs: rootURLs, parsers: parsers) {
       let relativePath = normalizePath(absoluteURL.path, projectRoot: outputRoot.path)
-      let source: String
-      do {
-        source = try String(contentsOf: absoluteURL, encoding: .utf8)
-      } catch {
-        throw SkeletonError.fileReadFailed(relativePath)
-      }
       guard let parser = parser(for: relativePath, in: parsers) else {
         continue
       }
-      let parsedFile = parser.parse(path: relativePath, source: source)
-        .replacing(languageName: parser.languageName)
-      let analysis = implementationAnalyzer.analyze(
-        path: relativePath,
-        blocks: parsedFile.blocks,
-        source: source,
-        language: parser.languageName,
-        syntaxEvidence: parsedFile.methodSyntaxEvidence
-      )
-      files[relativePath] = parsedFile.replacing(implementationAnalysis: analysis)
+      let source = try readSource(at: absoluteURL, displayPath: relativePath)
+      files[relativePath] = parseFile(path: relativePath, source: source, parser: parser)
       sources[relativePath] = source
     }
     return (files, sources)
   }
 
-  private func sourceFileURLs(rootURLs: [URL], parsers: [any SkeletonParser]) -> [URL] {
+  private func parseFile(path: String, source: String, parser: any SkeletonParser) -> ParsedFile {
+    let parsedFile = parser.parse(path: path, source: source)
+      .replacing(languageName: parser.languageName)
+    let analysis = implementationAnalyzer.analyze(
+      path: path,
+      blocks: parsedFile.blocks,
+      source: source,
+      language: parser.languageName,
+      syntaxEvidence: parsedFile.methodSyntaxEvidence
+    )
+    return parsedFile.replacing(implementationAnalysis: analysis)
+  }
+
+  private func readSource(at url: URL, displayPath: String) throws -> String {
+    do {
+      return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+      throw SkeletonError.fileReadFailed(displayPath)
+    }
+  }
+
+  private func sourceFileURLs(rootURLs: [URL], parsers: [any SkeletonParser]) throws -> [URL] {
     let allExtensions = parsers.reduce(into: Set<String>()) { $0.formUnion($1.supportedExtensions) }
     var filesByPath: [String: URL] = [:]
     for rootURL in rootURLs {
@@ -450,10 +536,19 @@ public struct SkeletonIndexCore: Sendable {
         continue
       }
       for case let fileURL as URL in enumerator {
-        guard allExtensions.contains(fileURL.pathExtension) else {
+        let isDirectory: Bool
+        do {
+          isDirectory = try fileURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory ?? false
+        } catch {
+          throw SkeletonError.fileReadFailed(fileURL.path)
+        }
+        if isDirectory {
+          if Self.excludedDirectoryNames.contains(fileURL.lastPathComponent) {
+            enumerator.skipDescendants()
+          }
           continue
         }
-        if Self.excludedPaths.contains(where: { fileURL.path.contains($0) }) {
+        guard allExtensions.contains(fileURL.pathExtension) else {
           continue
         }
         let standardized = fileURL.standardizedFileURL
@@ -461,6 +556,42 @@ public struct SkeletonIndexCore: Sendable {
       }
     }
     return filesByPath.values.sorted { $0.path < $1.path }
+  }
+
+  /// Mirrors `sourceFileURLs` for a single file so incremental updates index exactly
+  /// the files a fresh build of the same scope would.
+  private func isIndexable(
+    _ fileURL: URL,
+    scopeRoots: [URL],
+    parsers: [any SkeletonParser]
+  ) -> Bool {
+    guard parser(for: fileURL.path, in: parsers) != nil else {
+      return false
+    }
+    for rootURL in scopeRoots {
+      let rootPath = rootURL.path
+      guard fileURL.path.hasPrefix(rootPath + "/") else {
+        continue
+      }
+      let components = fileURL.path.dropFirst(rootPath.count + 1).split(separator: "/")
+      let isHiddenOrExcluded = components.enumerated().contains { offset, component in
+        component.hasPrefix(".")
+          || (offset < components.count - 1
+            && Self.excludedDirectoryNames.contains(String(component)))
+      }
+      if !isHiddenOrExcluded {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func absoluteURL(for path: String, projectRoot rootURL: URL) -> URL {
+    let normalized = path.replacingOccurrences(of: "\\", with: "/")
+    if normalized.hasPrefix("/") {
+      return URL(fileURLWithPath: normalized).standardizedFileURL
+    }
+    return rootURL.appendingPathComponent(normalized).standardizedFileURL
   }
 
   private func resolveProjectStructure(scopeRoot: String) throws -> ProjectStructure {
@@ -478,12 +609,32 @@ public struct SkeletonIndexCore: Sendable {
     files: [String: ParsedFile],
     outputRoot: URL
   ) {
-    let relativeRoots = unit.sourceRoots.map { normalizePath($0, projectRoot: outputRoot.path) }
-    for filePath in files.keys {
-      if relativeRoots.contains(where: { filePath == $0 || filePath.hasPrefix($0 + "/") }) {
-        fileUnitIDs[filePath] = unit.id
+    for filePath in files.keys where self.unit(unit, contains: filePath, outputRoot: outputRoot) {
+      fileUnitIDs[filePath] = unit.id
+    }
+  }
+
+  /// Uses the same precedence as `buildTargetIndex`: dependency units are assigned after the focus unit.
+  private func unitID(forFile filePath: String, index: ProjectIndex, outputRoot: URL) -> String? {
+    guard let structure = index.projectStructure, let focusUnitID = index.focusUnitID else {
+      return nil
+    }
+    var matchedUnitID: String?
+    for unitID in [focusUnitID] + index.dependencyUnitIDs {
+      guard let unit = structure.unit(id: unitID) else {
+        continue
+      }
+      if self.unit(unit, contains: filePath, outputRoot: outputRoot) {
+        matchedUnitID = unit.id
       }
     }
+    return matchedUnitID
+  }
+
+  private func unit(_ unit: ProjectUnit, contains filePath: String, outputRoot: URL) -> Bool {
+    unit.sourceRoots
+      .map { normalizePath($0, projectRoot: outputRoot.path) }
+      .contains { filePath == $0 || filePath.hasPrefix($0 + "/") }
   }
 
   private func renderSearchText(block: SkeletonBlock, header: String) -> String {
