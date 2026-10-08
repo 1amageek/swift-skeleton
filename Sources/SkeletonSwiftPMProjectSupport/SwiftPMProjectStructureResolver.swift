@@ -102,12 +102,17 @@ public struct SwiftPMProjectStructureResolver: ProjectStructureResolving, Sendab
     let errorHandle = try FileHandle(forWritingTo: errorURL)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    // A private scratch path keeps manifest evaluation independent of the package's own
+    // `.build` lock, which a concurrent `swift build` or `swift test` holds.
+    let scratchURL = temporaryRoot.appendingPathComponent("scratch", isDirectory: true)
     process.arguments = [
       "swift",
       "package",
-      "dump-package",
       "--package-path",
       packageRoot.path,
+      "--scratch-path",
+      scratchURL.path,
+      "dump-package",
     ]
     process.standardOutput = outputHandle
     process.standardError = errorHandle
