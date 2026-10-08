@@ -28,21 +28,7 @@ public struct GoSkeletonParser: SkeletonParser, Sendable {
 
         var blocks: [SkeletonBlock] = []
         var receiverMethods: [String: [MethodSignature]] = [:]
-
-        for childIndex in 0..<root.namedChildCount {
-            guard let child = root.namedChild(at: childIndex) else { continue }
-            guard let nodeType = child.nodeType else { continue }
-
-            if nodeType == "type_declaration" {
-                if let block = extractTypeDeclaration(node: child, source: source) {
-                    blocks.append(block)
-                }
-            } else if nodeType == "method_declaration" {
-                if let (receiverType, method) = extractMethodDeclaration(node: child, source: source) {
-                    receiverMethods[receiverType, default: []].append(method)
-                }
-            }
-        }
+        collectDeclarations(from: root, source: source, blocks: &blocks, receiverMethods: &receiverMethods)
 
         blocks = blocks.map { block in
             guard let additionalMethods = receiverMethods[block.typeName], !additionalMethods.isEmpty else {
@@ -67,47 +53,67 @@ public struct GoSkeletonParser: SkeletonParser, Sendable {
         )
     }
 
-    private func extractTypeDeclaration(node: Node, source: String) -> SkeletonBlock? {
-        guard let typeSpec = findChild(named: "type_spec", in: node) else { return nil }
-        guard let nameNode = findChild(named: "type_identifier", in: typeSpec) else { return nil }
+    private func collectDeclarations(
+        from node: Node,
+        source: String,
+        blocks: inout [SkeletonBlock],
+        receiverMethods: inout [String: [MethodSignature]]
+    ) {
+        for childIndex in 0..<node.namedChildCount {
+            guard let child = node.namedChild(at: childIndex) else { continue }
+            switch child.nodeType {
+            case "type_declaration":
+                blocks.append(contentsOf: extractTypeDeclaration(node: child, source: source))
+            case "method_declaration":
+                if let (receiverType, method) = extractMethodDeclaration(node: child, source: source) {
+                    receiverMethods[receiverType, default: []].append(method)
+                }
+            case "ERROR":
+                blocks.append(contentsOf: recoverTypeDeclarations(errorNode: child, source: source))
+                collectDeclarations(
+                    from: child, source: source, blocks: &blocks, receiverMethods: &receiverMethods
+                )
+            default:
+                continue
+            }
+        }
+    }
 
+    /// Emits one block per `type_spec`. A grouped declaration `type ( A ...; B ... )`
+    /// gives each spec its own range; a single declaration keeps the declaration range.
+    private func extractTypeDeclaration(node: Node, source: String) -> [SkeletonBlock] {
+        let isGrouped = hasToken("(", in: node)
+        return namedChildren(of: node)
+            .filter { $0.nodeType == "type_spec" }
+            .compactMap { spec in
+                extractTypeSpec(spec: spec, rangeNode: isGrouped ? spec : node, source: source)
+            }
+    }
+
+    private func extractTypeSpec(spec: Node, rangeNode: Node, source: String) -> SkeletonBlock? {
+        guard let nameNode = spec.child(byFieldName: "name") else { return nil }
         let typeName = nodeText(node: nameNode, source: source)
-        let startLine = Int(node.pointRange.lowerBound.row) + 1
-        let endLine = Int(node.pointRange.upperBound.row) + 1
+        guard !typeName.isEmpty else { return nil }
 
         var kind = "type"
         var properties: [PropertySignature] = []
         var methods: [MethodSignature] = []
         var inheritance: [String] = []
 
-        if let structType = findChild(named: "struct_type", in: typeSpec) {
-            kind = "struct"
-            if let fieldList = findChild(named: "field_declaration_list", in: structType) {
-                for i in 0..<fieldList.namedChildCount {
-                    guard let field = fieldList.namedChild(at: i) else { continue }
-                    guard let fieldType = field.nodeType else { continue }
-                    if fieldType == "field_declaration" {
-                        if let prop = extractFieldProperty(node: field, source: source) {
-                            properties.append(prop)
-                        }
-                    }
+        if let typeNode = spec.child(byFieldName: "type") {
+            switch typeNode.nodeType {
+            case "struct_type":
+                kind = "struct"
+                if let fieldList = findChild(named: "field_declaration_list", in: typeNode) {
+                    properties = extractFieldProperties(fields: namedChildren(of: fieldList), source: source)
                 }
-            }
-        } else if let interfaceType = findChild(named: "interface_type", in: typeSpec) {
-            kind = "interface"
-            for i in 0..<interfaceType.namedChildCount {
-                guard let child = interfaceType.namedChild(at: i) else { continue }
-                guard let childType = child.nodeType else { continue }
-                if childType == "method_elem" || childType == "method_spec" {
-                    if let method = extractInterfaceMethod(node: child, source: source, baseLine: startLine) {
-                        methods.append(method)
-                    }
-                } else if childType == "type_elem" || childType == "constraint_elem" {
-                    let text = nodeText(node: child, source: source).trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !text.isEmpty {
-                        inheritance.append(text)
-                    }
-                }
+            case "interface_type":
+                kind = "interface"
+                (methods, inheritance) = extractInterfaceMembers(
+                    elements: namedChildren(of: typeNode), source: source
+                )
+            default:
+                break
             }
         }
 
@@ -115,136 +121,235 @@ public struct GoSkeletonParser: SkeletonParser, Sendable {
             kind: .type(kind),
             typeName: typeName,
             inheritance: inheritance,
-            range: SourceRange(startLine: startLine, endLine: endLine),
+            range: SourceRange(startLine: startLine(of: rangeNode), endLine: endLine(of: rangeNode)),
             properties: properties,
             methods: methods,
-            hasErrorNode: node.hasError
+            hasErrorNode: rangeNode.hasError
         )
     }
 
-    private func extractFieldProperty(node: Node, source: String) -> PropertySignature? {
-        var nameText: String?
-        var typeText: String?
+    /// Recovers type declarations whose closing brace is missing. Tree-sitter reports them as an
+    /// ERROR node holding the `type` keyword, the name, the `struct`/`interface` keyword, and the
+    /// members parsed before the error. The end line stays unknown unless a real `}` is present.
+    private func recoverTypeDeclarations(errorNode: Node, source: String) -> [SkeletonBlock] {
+        var blocks: [SkeletonBlock] = []
+        var pending: RecoveredTypeDeclaration?
 
-        for i in 0..<node.namedChildCount {
-            guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
-            if childType == "field_identifier" {
-                nameText = nodeText(node: child, source: source)
-            } else if nameText != nil && typeText == nil {
-                typeText = nodeText(node: child, source: source)
+        func flush() {
+            defer { pending = nil }
+            guard let declaration = pending, let typeName = declaration.typeName else { return }
+            var properties: [PropertySignature] = []
+            var methods: [MethodSignature] = []
+            var inheritance: [String] = []
+            if declaration.kind == "struct" {
+                properties = extractFieldProperties(fields: declaration.members, source: source)
+            } else if declaration.kind == "interface" {
+                (methods, inheritance) = extractInterfaceMembers(elements: declaration.members, source: source)
             }
+            blocks.append(SkeletonBlock(
+                kind: .type(declaration.kind),
+                typeName: typeName,
+                inheritance: inheritance,
+                range: SourceRange(startLine: declaration.startLine, endLine: declaration.endLine),
+                properties: properties,
+                methods: methods,
+                hasErrorNode: true
+            ))
         }
 
-        guard let name = nameText, let typeRef = typeText else { return nil }
-        return PropertySignature(name: name, typeRef: typeRef)
+        for childIndex in 0..<errorNode.childCount {
+            guard let child = errorNode.child(at: childIndex), let childType = child.nodeType else { continue }
+            switch childType {
+            case "type":
+                flush()
+                pending = RecoveredTypeDeclaration(startLine: startLine(of: child))
+            case "identifier", "type_identifier":
+                if pending?.typeName == nil, pending?.hasBody == false {
+                    pending?.typeName = nodeText(node: child, source: source)
+                }
+            case "struct", "interface":
+                if pending?.typeName != nil, pending?.hasBody == false {
+                    pending?.kind = childType
+                }
+            case "{":
+                if pending?.typeName != nil {
+                    pending?.hasBody = true
+                }
+            case "}":
+                if pending?.hasBody == true, !child.isMissing {
+                    pending?.endLine = endLine(of: child)
+                    flush()
+                }
+            case "field_declaration", "method_elem", "method_spec", "type_elem", "constraint_elem":
+                if pending?.hasBody == true {
+                    pending?.members.append(child)
+                }
+            case "field_declaration_list":
+                if pending?.typeName != nil {
+                    pending?.hasBody = true
+                    pending?.members.append(contentsOf: namedChildren(of: child))
+                }
+            default:
+                continue
+            }
+        }
+        flush()
+        return blocks
     }
 
-    private func extractInterfaceMethod(node: Node, source: String, baseLine: Int) -> MethodSignature? {
-        let text = nodeText(node: node, source: source).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.contains("(") else { return nil }
-
-        guard let nameEnd = text.firstIndex(of: "(") else { return nil }
-        let name = String(text[text.startIndex..<nameEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return nil }
-
-        let params = TextUtilities.betweenParentheses(text) ?? ""
-        let paramTypes = parseGoParams(params)
-
-        var returnType: String?
-        if let closeIndex = text.lastIndex(of: ")") {
-            let afterParen = String(text[text.index(after: closeIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !afterParen.isEmpty && afterParen != "{" {
-                returnType = afterParen
+    private func extractFieldProperties(fields: [Node], source: String) -> [PropertySignature] {
+        var properties: [PropertySignature] = []
+        for field in fields where field.nodeType == "field_declaration" {
+            // Embedded fields have no `name` field; they and untyped fields are omitted.
+            guard let typeNode = field.child(byFieldName: "type") else { continue }
+            let typeRef = compactText(node: typeNode, source: source)
+            for nameNode in fieldNodes(named: "name", in: field) {
+                properties.append(PropertySignature(
+                    name: nodeText(node: nameNode, source: source),
+                    typeRef: typeRef
+                ))
             }
         }
+        return properties
+    }
 
-        let startLine = Int(node.pointRange.lowerBound.row) + 1
-        let endLine = Int(node.pointRange.upperBound.row) + 1
-
-        return MethodSignature(
-            name: name,
-            parameterTypeRefs: paramTypes,
-            returnTypeRef: returnType,
-            range: SourceRange(startLine: startLine, endLine: endLine),
-            isInitializer: false
-        )
+    private func extractInterfaceMembers(elements: [Node], source: String)
+        -> (methods: [MethodSignature], inheritance: [String])
+    {
+        var methods: [MethodSignature] = []
+        var inheritance: [String] = []
+        for element in elements {
+            switch element.nodeType {
+            case "method_elem", "method_spec":
+                if let method = extractSignature(node: element, source: source) {
+                    methods.append(method)
+                }
+            case "type_elem", "constraint_elem":
+                let text = compactText(node: element, source: source)
+                if !text.isEmpty {
+                    inheritance.append(text)
+                }
+            default:
+                continue
+            }
+        }
+        return (methods, inheritance)
     }
 
     private func extractMethodDeclaration(node: Node, source: String) -> (String, MethodSignature)? {
-        var receiverType: String?
-        var methodName: String?
+        guard let receiverList = node.child(byFieldName: "receiver"),
+              let receiverType = receiverTypeName(receiverList: receiverList, source: source),
+              let method = extractSignature(node: node, source: source)
+        else { return nil }
+        return (receiverType, method)
+    }
 
-        for i in 0..<node.namedChildCount {
-            guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
+    /// Builds a signature from the `name`, `parameters`, and `result` fields shared by
+    /// `method_declaration` and interface `method_elem` nodes. The range is the node's own lines.
+    private func extractSignature(node: Node, source: String) -> MethodSignature? {
+        guard let nameNode = node.child(byFieldName: "name") else { return nil }
+        let name = nodeText(node: nameNode, source: source)
+        guard !name.isEmpty else { return nil }
 
-            if childType == "parameter_list" && receiverType == nil && methodName == nil {
-                let paramText = nodeText(node: child, source: source)
-                receiverType = extractReceiverType(paramText)
-            } else if childType == "field_identifier" {
-                methodName = nodeText(node: child, source: source)
-            }
-        }
+        let parameterTypes = node.child(byFieldName: "parameters")
+            .map { parameterTypeRefs(parameterList: $0, source: source) } ?? []
+        let returnType = node.child(byFieldName: "result")
+            .map { resultTypeRef(result: $0, source: source) }
 
-        guard let recv = receiverType, let name = methodName else { return nil }
-
-        let text = nodeText(node: node, source: source)
-        let params: [String]
-        if let firstParen = text.firstIndex(of: "("),
-           let afterReceiver = text[text.index(after: firstParen)...].firstIndex(of: ")") {
-            let afterReceiverClose = text.index(after: afterReceiver)
-            let rest = String(text[afterReceiverClose...])
-            let paramSection = TextUtilities.betweenParentheses(rest) ?? ""
-            params = parseGoParams(paramSection)
-        } else {
-            params = []
-        }
-
-        var returnType: String?
-        let lines = text.components(separatedBy: "\n")
-        if let firstLine = lines.first {
-            let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let lastClose = trimmed.lastIndex(of: ")") {
-                let afterClose = String(trimmed[trimmed.index(after: lastClose)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !afterClose.isEmpty && afterClose != "{" {
-                    returnType = afterClose.hasSuffix("{") ? String(afterClose.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines) : afterClose
-                }
-            }
-        }
-
-        let startLine = Int(node.pointRange.lowerBound.row) + 1
-        let endLine = Int(node.pointRange.upperBound.row) + 1
-
-        let method = MethodSignature(
+        return MethodSignature(
             name: name,
-            parameterTypeRefs: params,
+            parameterTypeRefs: parameterTypes,
             returnTypeRef: returnType,
-            range: SourceRange(startLine: startLine, endLine: endLine),
+            range: SourceRange(startLine: startLine(of: node), endLine: endLine(of: node)),
             isInitializer: false
         )
-
-        return (recv, method)
     }
 
-    private func extractReceiverType(_ text: String) -> String? {
-        let inner = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = inner.split(separator: " ", maxSplits: 1).map(String.init)
-        guard let typePart = parts.last else { return nil }
-        return typePart.replacingOccurrences(of: "*", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func parseGoParams(_ paramSection: String) -> [String] {
-        let trimmed = paramSection.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return [] }
-        let chunks = TextUtilities.splitTopLevel(trimmed, by: ",")
-        return chunks.compactMap { chunk in
-            let parts = chunk.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
-            guard let typePart = parts.last else { return nil }
-            return String(typePart)
+    /// Expands grouped names so that `a, b int` yields one type reference per name.
+    private func parameterTypeRefs(parameterList: Node, source: String) -> [String] {
+        var typeRefs: [String] = []
+        for parameter in namedChildren(of: parameterList) {
+            let isVariadic: Bool
+            switch parameter.nodeType {
+            case "parameter_declaration": isVariadic = false
+            case "variadic_parameter_declaration": isVariadic = true
+            default: continue
+            }
+            let typeRef: String
+            if let typeNode = parameter.child(byFieldName: "type") {
+                let text = compactText(node: typeNode, source: source)
+                typeRef = isVariadic ? "..." + text : text
+            } else {
+                typeRef = "?"
+            }
+            let nameCount = max(1, fieldNodes(named: "name", in: parameter).count)
+            typeRefs.append(contentsOf: Array(repeating: typeRef, count: nameCount))
         }
+        return typeRefs
+    }
+
+    /// A parenthesized result renders as `(T1, T2)` with result names dropped,
+    /// so `(n int, err error)` and `(int, error)` render identically.
+    private func resultTypeRef(result: Node, source: String) -> String {
+        guard result.nodeType == "parameter_list" else {
+            return compactText(node: result, source: source)
+        }
+        let types = parameterTypeRefs(parameterList: result, source: source)
+        return "(" + types.joined(separator: ", ") + ")"
+    }
+
+    /// Resolves the receiver base type name, removing pointer and type-argument syntax
+    /// so `(s *Stack[T])` matches the `Stack` block.
+    private func receiverTypeName(receiverList: Node, source: String) -> String? {
+        guard let declaration = namedChildren(of: receiverList).first(where: {
+            $0.nodeType == "parameter_declaration"
+        }), var typeNode = declaration.child(byFieldName: "type") else { return nil }
+
+        while true {
+            switch typeNode.nodeType {
+            case "pointer_type", "parenthesized_type":
+                guard let inner = typeNode.namedChild(at: 0) else { return nil }
+                typeNode = inner
+            case "generic_type":
+                guard let base = typeNode.child(byFieldName: "type") else { return nil }
+                typeNode = base
+            case "type_identifier":
+                let name = nodeText(node: typeNode, source: source)
+                return name.isEmpty ? nil : name
+            default:
+                return nil
+            }
+        }
+    }
+
+    private func namedChildren(of node: Node) -> [Node] {
+        (0..<node.namedChildCount).compactMap { node.namedChild(at: $0) }
+    }
+
+    private func fieldNodes(named fieldName: String, in node: Node) -> [Node] {
+        (0..<node.childCount).compactMap { index in
+            node.fieldNameForChild(at: index) == fieldName ? node.child(at: index) : nil
+        }
+    }
+
+    private func hasToken(_ token: String, in node: Node) -> Bool {
+        (0..<node.childCount).contains { node.child(at: $0)?.nodeType == token }
+    }
+
+    private func startLine(of node: Node) -> Int {
+        Int(node.pointRange.lowerBound.row) + 1
+    }
+
+    private func endLine(of node: Node) -> Int {
+        Int(node.pointRange.upperBound.row) + 1
+    }
+
+    /// Materializes a short signature fragment (a type reference) with whitespace runs
+    /// collapsed, so multi-line types render on one skeleton line.
+    private func compactText(node: Node, source: String) -> String {
+        nodeText(node: node, source: source)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
     }
 
     private func findChild(named name: String, in node: Node) -> Node? {
@@ -264,4 +369,14 @@ public struct GoSkeletonParser: SkeletonParser, Sendable {
         let end = String.Index(utf16Offset: clampedUpper, in: source)
         return String(source[start..<end])
     }
+}
+
+/// Accumulates the pieces of a type declaration recovered from an ERROR node.
+private struct RecoveredTypeDeclaration {
+    let startLine: Int
+    var typeName: String?
+    var kind = "type"
+    var hasBody = false
+    var endLine: Int?
+    var members: [Node] = []
 }
