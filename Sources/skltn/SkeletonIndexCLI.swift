@@ -3,8 +3,20 @@ import SkeletonIndexCore
 
 @main
 enum SkeletonIndexCLIMain {
-  static func main() async throws {
-    var arguments = Array(CommandLine.arguments.dropFirst())
+  static func main() async {
+    do {
+      try await run(arguments: Array(CommandLine.arguments.dropFirst()))
+    } catch let error as SkeletonCLIError {
+      writeError("\(error)\nrun 'skltn help' for usage")
+      exit(2)
+    } catch {
+      writeError("\(error)")
+      exit(1)
+    }
+  }
+
+  private static func run(arguments commandLine: [String]) async throws {
+    var arguments = commandLine
     guard let command = arguments.first else {
       try runSkeleton(arguments: [])
       return
@@ -23,10 +35,13 @@ enum SkeletonIndexCLIMain {
     case "files":
       try runFiles(arguments: arguments)
     case "languages":
+      try validateOptions(arguments, valueFlags: [], booleanFlags: [], maximumPositionals: 0)
       runLanguages()
     case "daemon":
+      try validateOptions(arguments, valueFlags: [], booleanFlags: [], maximumPositionals: 0)
       await runDaemon()
     case "install-skill":
+      try validateOptions(arguments, valueFlags: [], booleanFlags: [], maximumPositionals: 0)
       try installSkill()
     case "help", "--help", "-h":
       printUsage()
@@ -36,16 +51,31 @@ enum SkeletonIndexCLIMain {
     }
   }
 
+  private static func writeError(_ message: String) {
+    FileHandle.standardError.write(Data("skltn: error: \(message)\n".utf8))
+  }
+
+  private static let rootFlags: Set<String> = ["--project-root", "--root"]
+  private static let languageFlags: Set<String> = ["--language", "--lang", "--languages"]
+  private static let getValueFlags: Set<String> = rootFlags.union(languageFlags).union([
+    "--path", "--file", "--target", "--access", "--kind", "--kinds",
+  ])
+  private static let queryValueFlags: Set<String> = rootFlags.union(languageFlags).union([
+    "--q", "--query", "--limit",
+  ])
+  private static let inspectionValueFlags: Set<String> = rootFlags.union(languageFlags)
+
   private static func runSkeleton(arguments: [String]) throws {
+    try validateOptions(
+      arguments, valueFlags: getValueFlags, booleanFlags: ["--headers-only"], maximumPositionals: 1)
     let core = makeCore()
     let projectRoot = resolvedProjectRoot(from: arguments)
     let languages = values(for: ["--language", "--lang", "--languages"], in: arguments)
     let path = optionalValue(for: ["--path", "--file"], in: arguments)
     let target = optionalValue(for: "--target", in: arguments)
-    let kinds = Set(values(for: ["--kind", "--kinds"], in: arguments).map { $0.lowercased() })
-    let access = try accessBoundary(in: arguments)
+    let kinds = try RequestValidation.kinds(values(for: ["--kind", "--kinds"], in: arguments))
+    let access = try RequestValidation.accessBoundary(optionalValue(for: "--access", in: arguments))
 
-    try validateKinds(kinds)
     let index = try core.build(projectRoot: projectRoot, languages: languages, targetName: target)
     try core.validateRender(index: index, accessBoundary: access)
 
@@ -62,6 +92,10 @@ enum SkeletonIndexCLIMain {
   }
 
   private static func runQuery(arguments: [String]) throws {
+    let hasExplicitQuery = optionalValue(for: ["--q", "--query"], in: arguments) != nil
+    try validateOptions(
+      arguments, valueFlags: queryValueFlags, booleanFlags: [],
+      maximumPositionals: hasExplicitQuery ? 1 : 2)
     let core = makeCore()
     let languages = values(for: ["--language", "--lang", "--languages"], in: arguments)
     let projectRoot: String
@@ -83,7 +117,7 @@ enum SkeletonIndexCLIMain {
       }
     }
 
-    let limit = optionalValue(for: "--limit", in: arguments).flatMap(Int.init) ?? 20
+    let limit = try RequestValidation.limit(optionalValue(for: "--limit", in: arguments))
     let index = try core.build(projectRoot: projectRoot, languages: languages)
     let hits = core.query(index: index, q: query, limit: limit)
 
@@ -93,6 +127,8 @@ enum SkeletonIndexCLIMain {
   }
 
   private static func runStatus(arguments: [String]) throws {
+    try validateOptions(
+      arguments, valueFlags: inspectionValueFlags, booleanFlags: [], maximumPositionals: 1)
     let core = makeCore()
     let index = try core.build(
       projectRoot: resolvedProjectRoot(from: arguments),
@@ -106,6 +142,8 @@ enum SkeletonIndexCLIMain {
   }
 
   private static func runDiagnostics(arguments: [String]) throws {
+    try validateOptions(
+      arguments, valueFlags: inspectionValueFlags, booleanFlags: [], maximumPositionals: 1)
     let core = makeCore()
     let index = try core.build(
       projectRoot: resolvedProjectRoot(from: arguments),
@@ -127,6 +165,8 @@ enum SkeletonIndexCLIMain {
   }
 
   private static func runFiles(arguments: [String]) throws {
+    try validateOptions(
+      arguments, valueFlags: inspectionValueFlags, booleanFlags: [], maximumPositionals: 1)
     let core = makeCore()
     let index = try core.build(
       projectRoot: resolvedProjectRoot(from: arguments),
@@ -150,38 +190,50 @@ enum SkeletonIndexCLIMain {
     )
   }
 
-  private static func validateKinds(_ kinds: Set<String>) throws {
-    let validKinds: Set<String> = ["class", "struct", "enum", "protocol", "actor", "extension"]
-    let invalidKinds = kinds.subtracting(validKinds)
-    if !invalidKinds.isEmpty {
-      throw SkeletonCLIError.invalidArguments(
-        "unsupported kind: \(invalidKinds.sorted().joined(separator: ","))")
+  /// Rejects unknown options, value options without a value, and extra positionals
+  /// instead of silently ignoring them.
+  private static func validateOptions(
+    _ arguments: [String],
+    valueFlags: Set<String>,
+    booleanFlags: Set<String>,
+    maximumPositionals: Int
+  ) throws {
+    var index = 0
+    var positionalCount = 0
+    while index < arguments.count {
+      let argument = arguments[index]
+      index += 1
+      guard argument.hasPrefix("-") else {
+        positionalCount += 1
+        continue
+      }
+      if let separator = argument.firstIndex(of: "=") {
+        let flag = String(argument[..<separator])
+        guard valueFlags.contains(flag) else {
+          throw SkeletonCLIError.invalidArguments("unknown option: \(flag)")
+        }
+        continue
+      }
+      if booleanFlags.contains(argument) {
+        continue
+      }
+      guard valueFlags.contains(argument) else {
+        throw SkeletonCLIError.invalidArguments("unknown option: \(argument)")
+      }
+      guard index < arguments.count else {
+        throw SkeletonCLIError.invalidArguments("missing value for \(argument)")
+      }
+      index += 1
     }
-  }
-
-  private static func accessBoundary(in arguments: [String]) throws -> AccessBoundary? {
-    guard let rawValue = optionalValue(for: "--access", in: arguments)?.lowercased() else {
-      return nil
+    if positionalCount > maximumPositionals {
+      throw SkeletonCLIError.invalidArguments("unexpected arguments: expected at most \(maximumPositionals) positional value(s)")
     }
-    guard let boundary = AccessBoundary(rawValue: rawValue) else {
-      throw SkeletonCLIError.invalidArguments(
-        "unsupported access: \(rawValue); expected public,package,internal,fileprivate,private,all"
-      )
-    }
-    return boundary
   }
 
   private static func resolvedProjectRoot(from arguments: [String]) -> String {
     optionalValue(for: ["--project-root", "--root"], in: arguments)
       ?? positionals(in: arguments).first
       ?? FileManager.default.currentDirectoryPath
-  }
-
-  private static func value(for flag: String, in args: [String]) throws -> String {
-    guard let value = optionalValue(for: flag, in: args) else {
-      throw SkeletonCLIError.invalidArguments("missing \(flag)")
-    }
-    return value
   }
 
   private static func optionalValue(for flag: String, in args: [String]) -> String? {
@@ -261,23 +313,32 @@ enum SkeletonIndexCLIMain {
       usage:
         skltn get [project-root] [--target <name>] [--access <level>] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
         skltn [project-root] [--target <name>] [--access <level>] [--path <file>] [--language <name>] [--kind <kind>] [--headers-only]
-        skltn query [project-root] --q <string> [--limit <n>] [--language <name>]
+        skltn query [project-root] --q <text> [--limit <n>] [--language <name>]
+        skltn query [project-root] <text> [--limit <n>] [--language <name>]
         skltn status [project-root] [--language <name>]
         skltn diagnostics [project-root] [--language <name>]
         skltn files [project-root] [--language <name>]
         skltn languages
         skltn daemon
         skltn install-skill
+        skltn help
 
       aliases:
         skeleton, get_skeleton, build -> get
         search -> query
         diag -> diagnostics
+        --help, -h -> help
+
+      option aliases:
+        --project-root, --root
+        --path, --file
+        --language, --lang, --languages
+        --kind, --kinds
+        --q, --query
+
+      value options also accept --option=value; language and kind values may be comma-separated.
+      exit status: 0 success, 1 indexing failure, 2 invalid arguments.
       """
     )
   }
-}
-
-enum SkeletonCLIError: Error {
-  case invalidArguments(String)
 }

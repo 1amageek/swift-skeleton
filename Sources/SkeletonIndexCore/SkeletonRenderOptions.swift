@@ -9,7 +9,8 @@ public struct SkeletonRenderOptions: Sendable, Equatable {
     headersOnly: Bool = false
   ) {
     self.accessBoundary = accessBoundary
-    self.kinds = kinds
+    // Declaration keywords are lowercase in every supported language.
+    self.kinds = Set(kinds.map { $0.lowercased() })
     self.headersOnly = headersOnly
   }
 

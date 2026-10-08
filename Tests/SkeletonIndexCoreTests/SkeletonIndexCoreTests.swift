@@ -287,7 +287,7 @@ func extractsEnumTypes() throws {
   let index = try core.build(projectRoot: projectSourcesRoot())
   let result = core.getSkeleton(index: index)
 
-  #expect(result.text.contains("enum SkeletonError: Error, Sendable [SkeletonError.swift:"))
+  #expect(result.text.contains("enum SkeletonError: Error, Sendable, Equatable [SkeletonError.swift:"))
   #expect(
     result.text.contains(
       "enum SkeletonBlockKind: Sendable, Equatable, Codable [SkeletonBlockKind.swift:"))
@@ -522,9 +522,8 @@ func extractsSidecarServiceOptionalProps() throws {
   let result = core.getSkeleton(index: index)
 
   #expect(result.text.contains("actor SidecarService: SkeletonIndexService"))
-  #expect(result.text.contains("process:Process?"))
-  #expect(result.text.contains("input:FileHandle?"))
-  #expect(result.text.contains("output:FileHandle?"))
+  #expect(result.text.contains("connection:Connection?"))
+  #expect(result.text.contains("pending:[Int: CheckedContinuation<Data, any Error>]"))
 }
 
 @Test("CLI enum extracted with static methods")
@@ -535,7 +534,7 @@ func extractsCLIEnum() throws {
 
   #expect(result.text.contains("enum SkeletonIndexCLIMain [skltn/SkeletonIndexCLI.swift:"))
   #expect(result.text.contains("main()"))
-  #expect(result.text.contains("value(String, [String]) -> String"))
+  #expect(result.text.contains("validateOptions([String], Set<String>, Set<String>, Int)"))
   #expect(result.text.contains("optionalValue(String, [String]) -> String?"))
 }
 

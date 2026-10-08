@@ -254,6 +254,8 @@ skltn daemon
 
 Methods: `index.open`, `index.status`, `index.get_skeleton`, `index.update`, `index.query`, `index.diagnostics`
 
+Each line is one JSON-RPC 2.0 request, notification, or batch. Notifications get no reply. Errors use `-32700` (parse), `-32600` (invalid request), `-32601` (unknown method), `-32602` (invalid params), and `-32000` for index failures, whose `data.kind` and `data.detail` identify the `SkeletonError` so `SidecarService` rethrows the same error as `EmbeddedService`.
+
 ## Requirements
 
 - Swift 6.2+

@@ -108,6 +108,9 @@
   - `index.query`
   - `index.diagnostics`
 - `index.query` は skeleton text 検索。ランキングは簡易実装で可。
+- 1行に1つの request / notification / batch。`id` メンバーのない notification には応答しない。
+- エラーコード: `-32700` parse error、`-32600` invalid request、`-32601` method not found、`-32602` invalid params（必須値の欠落・型違い）、`-32000` index failure。`-32000` は `data.kind`（`SkeletonError` の case 名）と `data.detail` を持ち、`SidecarService` は `EmbeddedService` と同じ `SkeletonError` を再構成して throw する。
+- `index.update` は `index.open` 時の言語・source root・除外規則を維持し、同じ scope の fresh build と同じファイル集合を索引する。
 
 ## Implementation Fingerprint契約
 - 組み込みパーサはTree-sitter ASTが生存している間にcall / return / write / branch / catch / trapを証拠へ縮約する。

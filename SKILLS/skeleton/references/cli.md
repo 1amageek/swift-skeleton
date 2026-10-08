@@ -73,8 +73,12 @@ Query searches declaration headers, inheritance, typed properties, method names,
 
 ## Process commands
 
-- `daemon` starts the JSON-RPC 2.0 loop on standard input and standard output.
+- `daemon` starts the JSON-RPC 2.0 loop on standard input and standard output: one request, notification, or batch per line. Notifications (no `id`) get no reply. Malformed params return `-32602`; index failures return `-32000` with `data.kind` and `data.detail` naming the error.
 - `install-skill` installs this skill for detected Claude Code and Codex directories.
+
+## Errors and exit status
+
+Unknown options, value options without a value, extra positional values, a non-integer `--limit`, and unsupported `--kind` or `--access` values are rejected with exit status 2. Indexing failures such as a missing project root exit with status 1. Both print `skltn: error: <message>` to standard error.
 
 ## Output size
 

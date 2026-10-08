@@ -319,5 +319,9 @@ let package = Package(
     .testTarget(
       name: "SkeletonCLIE2ETests"
     ),
+    .testTarget(
+      name: "SkeletonIndexClientTests",
+      dependencies: ["SkeletonIndexClient", "SkeletonIndexCore", "SkeletonSwiftParser"]
+    ),
   ]
 )

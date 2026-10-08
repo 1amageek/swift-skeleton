@@ -235,6 +235,60 @@ func daemonJsonRPCEndToEnd() async throws {
 }
 
 @Test(.timeLimit(.minutes(1)))
+func daemonFollowsJSONRPCRequestRules() async throws {
+  let projectRoot = try makeTemporaryProject(files: [
+    "Library.swift": "public struct Library {}"
+  ])
+  defer { removeTemporaryProject(projectRoot) }
+
+  let request = """
+    {"jsonrpc":"2.0","method":"index.open","params":{"project_root":"\(projectRoot)"}}
+    [{"jsonrpc":"2.0","id":"a","method":"index.status","params":{"project_id":"missing"}},{"jsonrpc":"2.0","method":"index.status","params":{"project_id":"missing"}},{"jsonrpc":"2.0","id":"b","method":"index.nope"}]
+    {"jsonrpc":"2.0","id":3,"method":"index.open","params":{"project_root":"\(projectRoot)","languages":"swift"}}
+    {"jsonrpc":"2.0","id":{"bad":1},"method":"index.status"}
+    {"jsonrpc":"2.0","id":4,"method":"index.query","params":{"project_id":"missing","q":"x","limit":"1"}}
+
+    """
+  let response = try await runSkltn(["daemon"], stdin: request)
+  let lines = response.stdout.split(separator: "\n").map(String.init)
+
+  #expect(response.exitCode == 0)
+  #expect(lines.count == 4, "notifications must not produce output: \(lines)")
+  let batch = try #require(try JSONSerialization.jsonObject(with: Data(lines[0].utf8)) as? [[String: Any]])
+  #expect(batch.count == 2)
+  let missing = try #require(batch.first { $0["id"] as? String == "a" }?["error"] as? [String: Any])
+  #expect(missing["code"] as? Int == -32000)
+  #expect((missing["data"] as? [String: Any])?["kind"] as? String == "projectNotFound")
+  #expect((batch.first { $0["id"] as? String == "b" }?["error"] as? [String: Any])?["code"] as? Int == -32601)
+  #expect(lines[1].contains(#""id":3"#) && lines[1].contains("-32602"))
+  #expect(lines[2].contains(#""id":null"#) && lines[2].contains("-32600"))
+  #expect(lines[3].contains(#""id":4"#) && lines[3].contains("-32602"))
+}
+
+@Test(.timeLimit(.minutes(1)))
+func cliReportsUserErrorsWithoutCrashing() async throws {
+  let missingRoot = try await runSkltn(["get", "/nonexistent-skltn-root"])
+  #expect(missingRoot.exitCode == 1)
+  #expect(missingRoot.stderr.contains("project root is not a directory: /nonexistent-skltn-root"))
+
+  let projectRoot = try makeTemporaryProject(files: ["A.swift": "struct A {}"])
+  defer { removeTemporaryProject(projectRoot) }
+
+  for arguments in [
+    ["query", projectRoot, "--q", "A", "--limit", "abc"],
+    ["get", projectRoot, "--kind", "bogus"],
+    ["get", projectRoot, "--unknown"],
+    ["status", projectRoot, "--language"],
+    ["get", projectRoot, "extra"],
+  ] {
+    let result = try await runSkltn(arguments)
+    #expect(result.exitCode == 2, "\(arguments): \(result.stderr)")
+    #expect(result.stderr.hasPrefix("skltn: error: "), "\(arguments)")
+    #expect(result.stdout.isEmpty, "\(arguments)")
+  }
+}
+
+@Test(.timeLimit(.minutes(1)))
 func cliLanguagesEndToEnd() async throws {
   let result = try await runSkltn(["languages"])
   #expect(result.exitCode == 0)
