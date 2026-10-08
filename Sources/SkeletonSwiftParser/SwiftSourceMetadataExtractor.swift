@@ -529,8 +529,38 @@ struct SwiftSourceMetadataExtractor: Sendable {
   private func sourceRange(for node: Node) -> SourceRange {
     SourceRange(
       startLine: Int(node.pointRange.lowerBound.row) + 1,
-      endLine: Int(node.pointRange.upperBound.row) + 1
+      endLine: contentEndRow(of: node) + 1
     )
+  }
+
+  /// Some Swift grammar nodes (for example `enum_entry`) end with a newline token, so their
+  /// extent reaches the next declaration's line. The range ends at the last non-empty token.
+  private func contentEndRow(of node: Node) -> Int {
+    let cursor = node.treeCursor
+    var lastContentChild: Node?
+    if cursor.goToFirstChild() {
+      repeat {
+        if let child = cursor.currentNode, child.byteRange.count > 0,
+          child.isNamed || !isLineBreakToken(child)
+        {
+          lastContentChild = child
+        }
+      } while cursor.gotoNextSibling()
+    }
+    if let lastContentChild {
+      return contentEndRow(of: lastContentChild)
+    }
+    let start = Int(node.pointRange.lowerBound.row)
+    let end = node.pointRange.upperBound
+    if end.column == 0 && Int(end.row) > start {
+      return Int(end.row) - 1
+    }
+    return Int(end.row)
+  }
+
+  private func isLineBreakToken(_ node: Node) -> Bool {
+    node.pointRange.upperBound.row > node.pointRange.lowerBound.row
+      || node.pointRange.upperBound.column == 0
   }
 
   private func nodeText(_ node: Node, source: String) -> String {

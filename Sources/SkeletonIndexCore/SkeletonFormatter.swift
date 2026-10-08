@@ -207,15 +207,19 @@ public struct SkeletonFormatter: Sendable {
       if block.hasErrorNode {
         hasErrors = true
       }
-      let blockFindings = findings(for: block, in: parsedFile.implementationAnalysis.findings)
-      lines.append(header(for: block, filePath: path, findings: blockFindings))
-
       let properties = block.properties.filter {
         isVisible($0.access, boundary: boundary, allowedSPIGroups: allowedSPIGroups)
       }
       let methods = block.methods.filter {
         isVisible($0.access, boundary: boundary, allowedSPIGroups: allowedSPIGroups)
       }
+      // The header summarizes only members this view shows, including `--headers-only`.
+      let blockFindings = findings(
+        for: block,
+        methods: methods,
+        in: parsedFile.implementationAnalysis.findings
+      )
+      lines.append(header(for: block, filePath: path, findings: blockFindings))
 
       if !options.headersOnly && !properties.isEmpty {
         let props =
@@ -312,22 +316,30 @@ public struct SkeletonFormatter: Sendable {
     return String(value)
   }
 
+  /// Method findings belong to a block by method identity, not by line containment: Go receiver
+  /// methods are attached to their type's block but declared outside its range.
   private func findings(
     for block: SkeletonBlock,
+    methods: [MethodSignature],
     in findings: [ImplementationFinding]
   ) -> [ImplementationFinding] {
     findings.filter { finding in
       guard finding.typeName == block.typeName else {
         return false
       }
-      guard let blockStart = block.range.startLine,
-        let findingStart = finding.range.startLine
-      else {
-        return true
+      switch finding.scope {
+      case .method:
+        return methods.contains { $0.name == finding.methodName && $0.range == finding.range }
+      case .type:
+        guard let blockStart = block.range.startLine,
+          let findingStart = finding.range.startLine
+        else {
+          return true
+        }
+        let blockEnd = block.range.endLine ?? Int.max
+        let findingEnd = finding.range.endLine ?? findingStart
+        return findingStart >= blockStart && findingEnd <= blockEnd
       }
-      let blockEnd = block.range.endLine ?? Int.max
-      let findingEnd = finding.range.endLine ?? findingStart
-      return findingStart >= blockStart && findingEnd <= blockEnd
     }
   }
 
@@ -335,7 +347,7 @@ public struct SkeletonFormatter: Sendable {
     block: SkeletonBlock,
     findings: [ImplementationFinding]
   ) -> String {
-    let blockFindings = self.findings(for: block, in: findings)
+    let blockFindings = self.findings(for: block, methods: block.methods, in: findings)
     let domains = ImplementationFinding.Domain.allCases.filter { domain in
       blockFindings.contains { $0.domain == domain }
     }
