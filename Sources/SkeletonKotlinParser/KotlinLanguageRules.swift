@@ -24,14 +24,40 @@ public struct KotlinLanguageRules: LanguageRules, Sendable {
         ":"
     }
 
+    /// `//` and nestable `/* */` comments, single-line `"…"` and multi-line raw `"""…"""` strings
+    /// with `${ … }` templates, and `'…'` character literals.
+    public var lexicalSyntax: LexicalSyntax {
+        LexicalSyntax(
+            lineComments: true,
+            blockComments: true,
+            nestedBlockComments: true,
+            doubleQuotedStringsSpanLines: false,
+            tripleQuotedStrings: true,
+            singleQuote: .literal,
+            templateLiterals: false,
+            dollarBraceInterpolation: true,
+            rawStrings: false
+        )
+    }
+
+    /// A `companion object` is reported as an `object` block, like any nested type. An unnamed
+    /// companion takes Kotlin's implicit name `Companion`.
+    public func parseTypeHeader(_ header: String) -> TypeHeader? {
+        if TextUtilities.firstRegex(pattern: #"\b(companion)\s+object\b"#, in: header) != nil {
+            let name = TextUtilities.firstRegex(
+                pattern: #"\bcompanion\s+object\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                in: header
+            )
+            return TypeHeader(keyword: "object", name: name ?? "Companion")
+        }
+        return TypeHeader.match(in: header, keywordPattern: typeKeywordPattern, namePattern: typeNamePattern)
+    }
+
     public func parseInheritance(from header: String) -> [String] {
-        guard let headerPart = header.split(separator: "{", maxSplits: 1).first.map(String.init) else {
+        guard let colon = TextUtilities.firstTopLevelIndex(in: header, character: ":") else {
             return []
         }
-        guard let colon = TextUtilities.firstTopLevelIndex(in: headerPart, character: ":") else {
-            return []
-        }
-        let inheritanceText = String(headerPart[headerPart.index(after: colon)...])
+        let inheritanceText = String(header[header.index(after: colon)...])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if inheritanceText.isEmpty {
             return []
@@ -47,6 +73,13 @@ public struct KotlinLanguageRules: LanguageRules, Sendable {
             .filter { !$0.isEmpty }
     }
 
+    /// Matches `fun name(`, `fun <T> name(`, and extension functions such as
+    /// `fun <T> List<T>.name(`, capturing the function name rather than the receiver type.
+    private static let functionNamePattern =
+        #"\bfun\s+(?:<(?:[^<>]|<[^<>]*>)*>\s*)?"#
+        + #"(?:[A-Za-z_][A-Za-z0-9_]*(?:<(?:[^<>]|<[^<>]*>)*>)?\??\.)*"#
+        + #"([A-Za-z_][A-Za-z0-9_]*|`[^`]+`)\s*\("#
+
     public func parseMethodStart(from trimmedLine: String) -> MethodStart? {
         let isConstructor = trimmedLine.contains("constructor(")
         let isFunction = trimmedLine.contains("fun ")
@@ -59,7 +92,7 @@ public struct KotlinLanguageRules: LanguageRules, Sendable {
             return MethodStart(name: "constructor", isInitializer: true)
         }
 
-        guard let name = TextUtilities.firstRegex(pattern: #"fun\s+([A-Za-z_][A-Za-z0-9_]*)"#, in: trimmedLine) else {
+        guard let name = TextUtilities.firstRegex(pattern: Self.functionNamePattern, in: trimmedLine) else {
             return nil
         }
         return MethodStart(name: name, isInitializer: false)

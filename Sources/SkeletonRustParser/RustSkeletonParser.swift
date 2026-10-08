@@ -58,7 +58,8 @@ public struct RustSkeletonParser: SkeletonParser, Sendable {
         if let nodeType = node.nodeType, Self.declarationTypes.contains(nodeType) {
             let snippet = nodeText(node: node, source: source)
             let startLine = Int(node.pointRange.lowerBound.row) + 1
-            let hasMissingClosingBrace = node.hasError && !snippet.contains("}")
+            let hasMissingClosingBrace = node.hasError
+                && SourceLexer.braceBalance(of: snippet, syntax: Self.rules.lexicalSyntax) > 0
             let endLine = hasMissingClosingBrace ? nil : Int(node.pointRange.upperBound.row) + 1
 
             results.append(DeclarationNode(

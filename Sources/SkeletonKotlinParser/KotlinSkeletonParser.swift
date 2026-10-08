@@ -44,7 +44,12 @@ public struct KotlinSkeletonParser: SkeletonParser, Sendable {
         "class_declaration",
         "object_declaration",
         "interface_declaration",
+        "companion_object",
     ]
+
+    /// Keyword tokens that open a type declaration when Tree-sitter could only recover an
+    /// `ERROR` node, for example a class whose closing brace is missing.
+    private static let recoveredDeclarationKeywords: Set<String> = ["class", "interface", "object"]
 
     private func collectDeclarationNodes(from node: Node, source: String) -> [DeclarationNode] {
         var results: [DeclarationNode] = []
@@ -54,10 +59,11 @@ public struct KotlinSkeletonParser: SkeletonParser, Sendable {
 
     private func walkDeclarations(from node: Node, source: String, into results: inout [DeclarationNode]) {
         if let nodeType = node.nodeType {
-            if Self.declarationTypes.contains(nodeType) {
+            if Self.declarationTypes.contains(nodeType) || isRecoveredDeclaration(node, nodeType: nodeType) {
                 let snippet = nodeText(node: node, source: source)
                 let startLine = Int(node.pointRange.lowerBound.row) + 1
-                let hasMissingClosingBrace = node.hasError && !snippet.contains("}")
+                let hasMissingClosingBrace = node.hasError
+                    && SourceLexer.braceBalance(of: snippet, syntax: Self.rules.lexicalSyntax) > 0
                 let endLine = hasMissingClosingBrace ? nil : Int(node.pointRange.upperBound.row) + 1
 
                 results.append(DeclarationNode(
@@ -73,6 +79,24 @@ public struct KotlinSkeletonParser: SkeletonParser, Sendable {
             guard let child = node.namedChild(at: childIndex) else { continue }
             walkDeclarations(from: child, source: source, into: &results)
         }
+    }
+
+    /// An `ERROR` node whose first token after optional modifiers is a type keyword is a type
+    /// declaration that Tree-sitter could not complete. It is emitted as a partial block.
+    private func isRecoveredDeclaration(_ node: Node, nodeType: String) -> Bool {
+        guard nodeType == "ERROR" else {
+            return false
+        }
+        for childIndex in 0..<node.childCount {
+            guard let child = node.child(at: childIndex), let childType = child.nodeType else {
+                continue
+            }
+            if childType == "modifiers" || child.isExtra {
+                continue
+            }
+            return !child.isNamed && Self.recoveredDeclarationKeywords.contains(childType)
+        }
+        return false
     }
 
     private func nodeText(node: Node, source: String) -> String {

@@ -2,6 +2,14 @@ import Foundation
 
 public enum TextUtilities {
 
+    /// Splits source text into lines the way Tree-sitter counts rows: only `\n` ends a line, and
+    /// `\r\n` (a single Swift `Character`) counts as one terminator. Other Unicode newlines such as
+    /// form feed or U+2028 stay inside the line so that line numbers match Tree-sitter rows.
+    public static func sourceLines(_ text: String) -> [String] {
+        text.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" })
+            .map(String.init)
+    }
+
     public static func braceBalance(_ line: String) -> Int {
         var balance = 0
         var inString = false
@@ -180,7 +188,14 @@ public enum TextUtilities {
             return []
         }
 
-        let chunks = splitTopLevel(parameterSection, by: ",")
+        var chunks = splitTopLevel(parameterSection, by: ",")
+        // A trailing comma ends the list; it does not introduce an untyped parameter.
+        if chunks.count > 1,
+            let last = chunks.last,
+            last.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            chunks.removeLast()
+        }
         return chunks.map { chunk in
             let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
@@ -213,6 +228,27 @@ public enum TextUtilities {
             return nil
         }
         return text[captureRange].trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    }
+
+    /// Returns the range of the first match and of each capture group (`nil` for a group that did
+    /// not participate in the match).
+    public static func firstRegexRanges(pattern: String, in text: String) -> (
+        match: Range<String.Index>, captures: [Range<String.Index>?]
+    )? {
+        let regex: NSRegularExpression
+        do {
+            regex = try NSRegularExpression(pattern: pattern, options: [])
+        } catch {
+            return nil
+        }
+        let nsRange = NSRange(location: 0, length: text.utf16.count)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
+            let matchRange = Range(match.range, in: text)
+        else {
+            return nil
+        }
+        let captures = (1..<max(1, match.numberOfRanges)).map { Range(match.range(at: $0), in: text) }
+        return (match: matchRange, captures: captures)
     }
 
     public static func firstRegexCapture(pattern: String, in text: String) -> (String, String)? {

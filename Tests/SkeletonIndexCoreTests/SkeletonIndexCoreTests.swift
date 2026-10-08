@@ -263,9 +263,9 @@ func extractsParserMethods() throws {
     ))
   #expect(result.text.contains("parse(String, String) -> ParsedFile"))
   #expect(result.text.contains("declarationHeader(String)"))
-  #expect(result.text.contains("parseMembers(String, Int)"))
+  #expect(result.text.contains("parseMembers([SourceLexer.Line], Int)"))
   #expect(result.text.contains("parseParameterTypeRefs(String) -> [String]"))
-  #expect(result.text.contains("parseReturnType(String) -> String?"))
+  #expect(result.text.contains("parseReturnType(SignatureText) -> String?"))
 }
 
 @Test("extracts SkeletonFormatter render and header methods")

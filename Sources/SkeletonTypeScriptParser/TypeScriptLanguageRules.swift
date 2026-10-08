@@ -24,10 +24,26 @@ public struct TypeScriptLanguageRules: LanguageRules, Sendable {
         ":"
     }
 
+    /// `//` and `/* */` comments, single-line `"…"` and `'…'` strings, and backtick template
+    /// literals with `${ … }` interpolation.
+    public var lexicalSyntax: LexicalSyntax {
+        LexicalSyntax(
+            lineComments: true,
+            blockComments: true,
+            nestedBlockComments: false,
+            doubleQuotedStringsSpanLines: false,
+            tripleQuotedStrings: false,
+            singleQuote: .literal,
+            templateLiterals: true,
+            dollarBraceInterpolation: false,
+            rawStrings: false
+        )
+    }
+
+    /// `header` is the declaration code before the body brace. Decorator arguments may contain
+    /// braces, so the header is not split on `{` again here.
     public func parseInheritance(from header: String) -> [String] {
-        guard let headerPart = header.split(separator: "{", maxSplits: 1).first.map(String.init) else {
-            return []
-        }
+        let headerPart = header
         var results: [String] = []
         for keyword in ["extends", "implements"] {
             guard let range = headerPart.range(of: " \(keyword) ") else { continue }
