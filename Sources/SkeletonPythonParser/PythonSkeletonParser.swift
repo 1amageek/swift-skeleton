@@ -37,25 +37,18 @@ public struct PythonSkeletonParser: SkeletonParser, Sendable {
         )
     }
 
+    /// Collects every `class_definition` in pre-order, including classes nested in other classes,
+    /// in function bodies, under decorators, and inside `if` / `try` / `with` blocks.
+    /// Each nested class becomes its own block; members are attributed only to the class whose
+    /// body directly contains them (see `extractMembers`).
     private func collectBlocks(from node: Node, source: String, into blocks: inout [SkeletonBlock]) {
+        if node.nodeType == "class_definition", let block = extractClass(node: node, source: source) {
+            blocks.append(block)
+        }
+
         for i in 0..<node.namedChildCount {
             guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
-
-            if childType == "class_definition" {
-                if let block = extractClass(node: child, source: source) {
-                    blocks.append(block)
-                }
-            } else if childType == "decorated_definition" {
-                for j in 0..<child.namedChildCount {
-                    guard let inner = child.namedChild(at: j) else { continue }
-                    if inner.nodeType == "class_definition" {
-                        if let block = extractClass(node: inner, source: source) {
-                            blocks.append(block)
-                        }
-                    }
-                }
-            }
+            collectBlocks(from: child, source: source, into: &blocks)
         }
     }
 
@@ -155,19 +148,29 @@ public struct PythonSkeletonParser: SkeletonParser, Sendable {
         )
     }
 
+    private static let parameterNodeTypes: Set<String> = [
+        "identifier", "typed_parameter", "default_parameter", "typed_default_parameter",
+        "list_splat_pattern", "dictionary_splat_pattern", "keyword_separator", "positional_separator",
+    ]
+
     private func extractParams(node: Node, source: String) -> [String] {
         var params: [String] = []
+        var isFirstParameter = true
         for i in 0..<node.namedChildCount {
             guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
+            guard let childType = child.nodeType, Self.parameterNodeTypes.contains(childType) else { continue }
+            defer { isFirstParameter = false }
+
+            // Only the leading receiver (`self` / `cls`) is implicit; names that merely start
+            // with those words, or appear later in the list, are real parameters.
+            if isFirstParameter, let name = parameterName(of: child, source: source), name == "self" || name == "cls" {
+                continue
+            }
 
             if childType == "identifier" {
-                let name = nodeText(node: child, source: source)
-                if name == "self" || name == "cls" { continue }
                 params.append("?")
             } else if childType == "typed_parameter" {
                 let text = nodeText(node: child, source: source)
-                if text.hasPrefix("self") || text.hasPrefix("cls") { continue }
                 if let colon = TextUtilities.firstTopLevelIndex(in: text, character: ":") {
                     let typeRef = String(text[text.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
                     params.append(typeRef.isEmpty ? "?" : typeRef)
@@ -176,7 +179,6 @@ public struct PythonSkeletonParser: SkeletonParser, Sendable {
                 }
             } else if childType == "typed_default_parameter" || childType == "default_parameter" {
                 let text = nodeText(node: child, source: source)
-                if text.hasPrefix("self") || text.hasPrefix("cls") { continue }
                 if let colon = TextUtilities.firstTopLevelIndex(in: text, character: ":") {
                     let afterColon = String(text[text.index(after: colon)...])
                     if let eq = TextUtilities.firstTopLevelIndex(in: afterColon, character: "=") {
@@ -193,6 +195,23 @@ public struct PythonSkeletonParser: SkeletonParser, Sendable {
             }
         }
         return params
+    }
+
+    /// Returns the declared name of a plain, typed, or defaulted parameter, or nil for splats and separators.
+    private func parameterName(of node: Node, source: String) -> String? {
+        switch node.nodeType {
+        case "identifier":
+            return nodeText(node: node, source: source)
+        case "default_parameter", "typed_default_parameter":
+            guard let nameNode = node.child(byFieldName: "name"), nameNode.nodeType == "identifier" else { return nil }
+            return nodeText(node: nameNode, source: source)
+        case "typed_parameter":
+            // `typed_parameter` has no name field; its leading named child is the bound pattern.
+            guard let nameNode = node.namedChild(at: 0), nameNode.nodeType == "identifier" else { return nil }
+            return nodeText(node: nameNode, source: source)
+        default:
+            return nil
+        }
     }
 
     private func extractProperty(node: Node, source: String) -> PropertySignature? {

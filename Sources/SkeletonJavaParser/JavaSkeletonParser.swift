@@ -77,15 +77,15 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
 
         var inheritance: [String] = []
         if let superclass = findChild(named: "superclass", in: node) {
-            let text = nodeText(node: superclass, source: source)
-            let cleaned = text.replacingOccurrences(of: "extends", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty { inheritance.append(cleaned) }
+            inheritance.append(contentsOf: typeTexts(in: superclass, source: source))
         }
-        if let interfaces = findChild(named: "super_interfaces", in: node) {
-            let text = nodeText(node: interfaces, source: source)
-            let cleaned = text.replacingOccurrences(of: "implements", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let parts = cleaned.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            inheritance.append(contentsOf: parts.filter { !$0.isEmpty })
+        // `implements` (classes, enums, records) and `extends` (interfaces) both wrap a
+        // `type_list`; reading its type children keeps generic arguments such as `Map<K, V>` intact.
+        for clauseName in ["super_interfaces", "extends_interfaces"] {
+            if let clause = findChild(named: clauseName, in: node),
+               let typeList = findChild(named: "type_list", in: clause) {
+                inheritance.append(contentsOf: typeTexts(in: typeList, source: source))
+            }
         }
 
         var properties: [PropertySignature] = []
@@ -112,10 +112,8 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
             guard let childType = child.nodeType else { continue }
 
             switch childType {
-            case "field_declaration":
-                if let prop = extractField(node: child, source: source) {
-                    properties.append(prop)
-                }
+            case "field_declaration", "constant_declaration":
+                properties.append(contentsOf: extractFields(node: child, source: source))
             case "method_declaration":
                 if let method = extractMethod(node: child, source: source, isConstructor: false) {
                     methods.append(method)
@@ -124,54 +122,42 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
                 if let method = extractMethod(node: child, source: source, isConstructor: true) {
                     methods.append(method)
                 }
+            case "enum_body_declarations":
+                // Fields, constructors, and methods of an enum follow its constants inside this node.
+                extractMembers(from: child, source: source, properties: &properties, methods: &methods)
             default:
                 break
             }
         }
     }
 
-    private func extractField(node: Node, source: String) -> PropertySignature? {
-        var typeText: String?
-        var nameText: String?
+    /// Returns one property per `variable_declarator`, so `int a, b;` yields both `a` and `b`.
+    private func extractFields(node: Node, source: String) -> [PropertySignature] {
+        guard let typeNode = node.child(byFieldName: "type") else { return [] }
+        let typeRef = nodeText(node: typeNode, source: source)
 
+        var properties: [PropertySignature] = []
         for i in 0..<node.namedChildCount {
-            guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
-
-            if childType.hasSuffix("_type") || childType == "type_identifier" || childType == "generic_type" || childType == "integral_type" || childType == "floating_point_type" || childType == "boolean_type" || childType == "array_type" || childType == "void_type" {
-                typeText = nodeText(node: child, source: source)
-            } else if childType == "variable_declarator" {
-                if let nameChild = findChild(named: "identifier", in: child) {
-                    nameText = nodeText(node: nameChild, source: source)
-                }
-            }
+            guard let child = node.namedChild(at: i), child.nodeType == "variable_declarator" else { continue }
+            guard let nameNode = child.child(byFieldName: "name") else { continue }
+            properties.append(PropertySignature(name: nodeText(node: nameNode, source: source), typeRef: typeRef))
         }
-
-        guard let name = nameText, let typeRef = typeText else { return nil }
-        return PropertySignature(name: name, typeRef: typeRef)
+        return properties
     }
 
     private func extractMethod(node: Node, source: String, isConstructor: Bool) -> MethodSignature? {
-        var nameText: String?
+        guard let nameNode = node.child(byFieldName: "name") else { return nil }
+        let name = nodeText(node: nameNode, source: source)
+
         var returnType: String?
-        var params: [String] = []
-
-        for i in 0..<node.namedChildCount {
-            guard let child = node.namedChild(at: i) else { continue }
-            guard let childType = child.nodeType else { continue }
-
-            if childType == "identifier" && nameText == nil {
-                nameText = nodeText(node: child, source: source)
-            } else if childType.hasSuffix("_type") || childType == "type_identifier" || childType == "generic_type" || childType == "void_type" || childType == "array_type" {
-                if !isConstructor && returnType == nil && nameText == nil {
-                    returnType = nodeText(node: child, source: source)
-                }
-            } else if childType == "formal_parameters" {
-                params = extractFormalParams(node: child, source: source)
-            }
+        if !isConstructor, let typeNode = node.child(byFieldName: "type") {
+            returnType = nodeText(node: typeNode, source: source)
         }
 
-        guard let name = nameText else { return nil }
+        var params: [String] = []
+        if let parameters = node.child(byFieldName: "parameters") {
+            params = extractFormalParams(node: parameters, source: source)
+        }
 
         let startLine = Int(node.pointRange.lowerBound.row) + 1
         let endLine = Int(node.pointRange.upperBound.row) + 1
@@ -179,7 +165,7 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
         return MethodSignature(
             name: name,
             parameterTypeRefs: params,
-            returnTypeRef: isConstructor ? nil : returnType,
+            returnTypeRef: returnType,
             range: SourceRange(startLine: startLine, endLine: endLine),
             isInitializer: isConstructor
         )
@@ -191,19 +177,38 @@ public struct JavaSkeletonParser: SkeletonParser, Sendable {
             guard let child = node.namedChild(at: i) else { continue }
             guard let childType = child.nodeType else { continue }
             if childType == "formal_parameter" || childType == "spread_parameter" {
-                for j in 0..<child.namedChildCount {
-                    guard let paramChild = child.namedChild(at: j) else { continue }
-                    guard let paramChildType = paramChild.nodeType else { continue }
-                    if paramChildType.hasSuffix("_type") || paramChildType == "type_identifier" || paramChildType == "generic_type" || paramChildType == "array_type" {
-                        var typeRef = nodeText(node: paramChild, source: source)
-                        if childType == "spread_parameter" { typeRef += "..." }
-                        params.append(typeRef)
-                        break
-                    }
+                // `spread_parameter` has no `type` field, so fall back to its first type child.
+                guard let typeNode = child.child(byFieldName: "type") ?? firstTypeChild(of: child) else {
+                    params.append("?")
+                    continue
                 }
+                var typeRef = nodeText(node: typeNode, source: source)
+                if childType == "spread_parameter" { typeRef += "..." }
+                params.append(typeRef)
             }
         }
         return params
+    }
+
+    private func isTypeNode(_ nodeType: String) -> Bool {
+        nodeType.hasSuffix("_type") || nodeType == "type_identifier" || nodeType == "scoped_type_identifier"
+    }
+
+    private func firstTypeChild(of node: Node) -> Node? {
+        for i in 0..<node.namedChildCount {
+            guard let child = node.namedChild(at: i), let childType = child.nodeType else { continue }
+            if isTypeNode(childType) { return child }
+        }
+        return nil
+    }
+
+    private func typeTexts(in node: Node, source: String) -> [String] {
+        var texts: [String] = []
+        for i in 0..<node.namedChildCount {
+            guard let child = node.namedChild(at: i), let childType = child.nodeType else { continue }
+            if isTypeNode(childType) { texts.append(nodeText(node: child, source: source)) }
+        }
+        return texts
     }
 
     private func findChild(named name: String, in node: Node) -> Node? {
