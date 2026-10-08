@@ -24,6 +24,9 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
             uniquingKeysWith: { first, _ in first }
         )
 
+        // Lines are split once per file for methods without AST evidence; tree-sitter rows
+        // count only "\n", so the same boundary is used here.
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
         for block in blocks {
             for method in block.methods {
                 if let evidence = evidenceByMethod[
@@ -44,11 +47,11 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
                     findings.append(contentsOf: makeFindings(analysis: analysis, evidence: evidence))
                     continue
                 }
-                let methodSource = sourceSlice(source: source, range: method.range)
+                let methodSource = sourceSlice(lines: lines, range: method.range)
                 var body = extractBody(from: methodSource, language: language)
                 if isAbstractRequirement(
                     methodSource: methodSource,
-                    source: source,
+                    lines: lines,
                     range: method.range,
                     language: language,
                     body: body
@@ -114,9 +117,11 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
         let propertySet = Set(properties)
         let parameterReads = evidence.parameterNames.filter(referenced.contains)
         let stateReads = properties.filter(referenced.contains)
-        let stateWrites = properties.filter { property in
-            evidence.assignmentTargets.contains(property)
-        }
+        // Writes to declared properties plus any other write that outlives the method
+        // (untyped or extension-external properties, globals, writes through parameters).
+        let stateWrites = orderedUnique(
+            properties.filter { evidence.assignmentTargets.contains($0) } + evidence.externalWriteTargets
+        )
         let returnOrigins: [ImplementationFingerprint.ReturnOrigin] = orderedUnique(evidence.returns.map { value in
             let identifiers = Set(value.identifiers)
             if !identifiers.isDisjoint(with: parameters) { return .parameter }
@@ -338,12 +343,8 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
         )
     }
 
-    private func sourceSlice(source: String, range: SourceRange) -> String {
-        guard let startLine = range.startLine else {
-            return ""
-        }
-        let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        guard !lines.isEmpty, startLine > 0, startLine <= lines.count else {
+    private func sourceSlice(lines: [Substring], range: SourceRange) -> String {
+        guard let startLine = range.startLine, startLine > 0, startLine <= lines.count else {
             return ""
         }
         let endLine = min(max(range.endLine ?? startLine, startLine), lines.count)
@@ -390,7 +391,7 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
 
     private func isAbstractRequirement(
         methodSource: String,
-        source: String,
+        lines: [Substring],
         range: SourceRange,
         language: String,
         body: BodySlice
@@ -402,10 +403,10 @@ public struct DefaultImplementationAnalyzer: ImplementationAnalyzing, Sendable {
         if signatureIdentifiers.contains("abstract") {
             return true
         }
-        guard language == "python", let startLine = range.startLine, startLine > 1 else {
+        guard language == "python", let startLine = range.startLine, startLine > 1,
+              startLine - 1 <= lines.count else {
             return false
         }
-        let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         var lineIndex = startLine - 2
         while lineIndex >= 0 {
             let line = lines[lineIndex].trimmingCharacters(in: .whitespacesAndNewlines)

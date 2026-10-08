@@ -185,6 +185,22 @@ func targetUpdateTracksUnitsAndImports() throws {
   #expect(text == core.getSkeleton(index: fresh).text)
 }
 
+@Test("indexing a file with thousands of methods stays linear", .timeLimit(.minutes(1)))
+func largeFileIndexingStaysLinear() throws {
+  let container = try makeScopeDirectory()
+  defer { removeScopeDirectory(container) }
+  var source = "struct Large {\n"
+  for index in 0..<4_000 {
+    source += "    private func method\(index)(value: Int) -> Int {\n        return value + \(index)\n    }\n"
+  }
+  source += "}\n"
+  try writeScopeFile(container, "Large.swift", source)
+
+  let index = try makeScopeCore().build(projectRoot: container.path)
+
+  #expect(index.files["Large.swift"]?.implementationAnalysis.methods.count == 4_000)
+}
+
 // MARK: - Helpers
 
 private struct FixedStructureResolver: ProjectStructureResolving {

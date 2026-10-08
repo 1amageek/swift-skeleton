@@ -53,7 +53,8 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
                 continue
             }
             let nonProduction = isNonProduction(path: path)
-            let source = sources[path] ?? ""
+            // Lines are split once per file; per-method slicing reuses them.
+            let lines = sourceLines(sources[path] ?? "")
             var resolvedMethods: [MethodImplementationAnalysis] = []
             // This resolver owns the wire and dead domains; drop any earlier context findings
             // so a re-resolve after an incremental update matches a fresh build.
@@ -68,7 +69,7 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
                 )
                 let reachability = productionReachability(
                     method: method,
-                    source: source,
+                    lines: lines,
                     path: path,
                     identifierIndex: identifierIndex,
                     nonProduction: nonProduction
@@ -112,7 +113,7 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
 
     private func productionReachability(
         method: MethodImplementationAnalysis,
-        source: String,
+        lines: [Substring],
         path: String,
         identifierIndex: ProjectIdentifierIndex,
         nonProduction: Bool
@@ -120,7 +121,7 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
         if nonProduction {
             return .nonProduction
         }
-        let methodSource = sourceSlice(source: source, range: method.range)
+        let methodSource = sourceSlice(lines: lines, range: method.range)
         guard isExplicitlyPrivate(methodSource: methodSource, path: path) else {
             return .external
         }
@@ -189,12 +190,13 @@ public struct DefaultImplementationContextResolver: ImplementationContextResolvi
         return identifiers.contains("private") || identifiers.contains("fileprivate")
     }
 
-    private func sourceSlice(source: String, range: SourceRange) -> String {
-        guard let startLine = range.startLine else {
-            return ""
-        }
-        let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        guard startLine > 0, startLine <= lines.count else {
+    /// Tree-sitter rows count only "\n", so slices use the same line boundaries.
+    private func sourceLines(_ source: String) -> [Substring] {
+        source.split(separator: "\n", omittingEmptySubsequences: false)
+    }
+
+    private func sourceSlice(lines: [Substring], range: SourceRange) -> String {
+        guard let startLine = range.startLine, startLine > 0, startLine <= lines.count else {
             return ""
         }
         let endLine = min(max(range.endLine ?? startLine, startLine), lines.count)

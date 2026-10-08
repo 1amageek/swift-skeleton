@@ -58,6 +58,9 @@ public struct MethodSyntaxEvidence: Sendable, Equatable {
     public let returns: [ReturnEvidence]
     public let callTargets: [String]
     public let assignmentTargets: [String]
+    /// Assignment targets that outlive the method: members, captured or global state, and
+    /// anything not declared as a local or parameter inside the method.
+    public let externalWriteTargets: [String]
     public let controlFlowPaths: Int
     public let throwsError: Bool
     public let trapCalls: [String]
@@ -76,6 +79,7 @@ public struct MethodSyntaxEvidence: Sendable, Equatable {
         returns: [ReturnEvidence],
         callTargets: [String],
         assignmentTargets: [String],
+        externalWriteTargets: [String] = [],
         controlFlowPaths: Int,
         throwsError: Bool,
         trapCalls: [String],
@@ -93,6 +97,7 @@ public struct MethodSyntaxEvidence: Sendable, Equatable {
         self.returns = returns
         self.callTargets = callTargets
         self.assignmentTargets = assignmentTargets
+        self.externalWriteTargets = externalWriteTargets
         self.controlFlowPaths = controlFlowPaths
         self.throwsError = throwsError
         self.trapCalls = trapCalls
