@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Documentation/Assets/header.png" alt="skltn — swift-skeleton: declaration skeletons and implementation signals for coding agents" width="100%">
+</p>
+
 # swift-skeleton
 
 Give LLMs the full picture of your codebase — without the full source.
