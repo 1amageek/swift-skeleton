@@ -6,6 +6,8 @@
 
 Give LLMs the full picture of your codebase — without the full source.
 
+https://github.com/user-attachments/assets/873a6540-a0cf-48c8-a24f-18a3b80843d5
+
 ## Why Skeleton?
 
 An LLM coding agent explores a codebase the same way a developer joins a new project. It doesn't need to read every line — it needs to see the shape first: what types exist, what methods they expose, how they relate to each other, and where to find them.
